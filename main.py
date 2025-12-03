@@ -34,7 +34,9 @@ from database import (
     save_summary,
     get_latest_summary,
     get_summaries,
-    get_summary_count
+    get_summary_count,
+    migrate_from_state_json,
+    update_account_tracking
 )
 from tweet_utils import (
     extract_tweet_ids_from_summary,
@@ -53,7 +55,19 @@ app = FastAPI(title="Financial Signal Aggregator API")
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
+    """Initialize database and run migration if needed."""
     init_database()
+    
+    # Run migration from state.json to database (one-time, idempotent)
+    try:
+        migration_report = migrate_from_state_json()
+        if migration_report["accounts_migrated"] > 0 or migration_report["tracking_migrated"] > 0:
+            print(f"[INFO] Migration completed: {migration_report['accounts_migrated']} accounts, "
+                  f"{migration_report['tracking_migrated']} tracking records migrated", flush=True)
+        if migration_report["errors"]:
+            print(f"[WARNING] Migration errors: {migration_report['errors']}", flush=True)
+    except Exception as e:
+        print(f"[WARNING] Migration failed (non-critical): {e}", flush=True)
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -891,17 +905,16 @@ async def refresh_brief(response: Response):
             await asyncio.sleep(6)  # 6 seconds to be safe (API limit is 5 seconds)
         
         context = get_session_context(handle)
-        previous_summary = context.get("previous_summary", "")
         last_tweet_id = context.get("last_tweet_id")
         
-        # If there's no previous summary (first fetch), ignore since_id
-        # Only use since_id when fetching new content after we have existing content
+        # Check if we have any summaries in database (indicates this is not first fetch)
+        # If we have last_tweet_id, use it for filtering
         since_id_to_use = None
-        if previous_summary and previous_summary.strip():
+        if last_tweet_id:
             since_id_to_use = last_tweet_id
-            log(f"[DEBUG] Fetching tweets for {handle} (has previous summary), using since_id: {since_id_to_use}")
+            log(f"[DEBUG] Fetching tweets for {handle} (has last_tweet_id), using since_id: {since_id_to_use}")
         else:
-            log(f"[DEBUG] Fetching tweets for {handle} (FIRST FETCH - no previous summary), ignoring since_id, fetching all tweets")
+            log(f"[DEBUG] Fetching tweets for {handle} (FIRST FETCH - no last_tweet_id), ignoring since_id, fetching all tweets")
         
         tweets = fetch_tweets(handle, since_id_to_use)
         log(f"[DEBUG] fetch_tweets returned {len(tweets)} tweets for {handle}")
@@ -935,13 +948,13 @@ async def refresh_brief(response: Response):
             "since_id_used_for_filtering": since_id_to_use,  # What was actually used to filter (None for first fetch)
             "last_tweet_id_in_state": last_tweet_id,  # What was in state before fetch
             "last_tweet_id": new_last_tweet_id,  # New: latest tweet ID from fetched tweets (will be saved to state)
-            "had_previous_summary": bool(previous_summary and previous_summary.strip()),
+            "had_last_tweet_id": bool(last_tweet_id),
             "tweet_count": len(tweets),
             "tweets": tweets
         })
         
         log(f"[DEBUG] Collected {len(tweets)} tweets for {handle} (will save all accounts together)")
-        log(f"[DEBUG]   had_previous_summary: {bool(previous_summary and previous_summary.strip())}")
+        log(f"[DEBUG]   had_last_tweet_id: {bool(last_tweet_id)}")
         log(f"[DEBUG]   since_id_used_for_filtering: {since_id_to_use}")
         log(f"[DEBUG]   last_tweet_id_in_state: {last_tweet_id}")
         log(f"[DEBUG]   new_last_tweet_id (latest fetched): {new_last_tweet_id}")
@@ -980,17 +993,11 @@ async def refresh_brief(response: Response):
         import traceback
         traceback.print_exc(file=sys.stderr)
     
-    # Get combined previous summary
-    previous_summaries = []
-    for handle in accounts:
-        context = get_session_context(handle)
-        prev_summary = context.get("previous_summary", "")
-        if prev_summary:
-            previous_summaries.append(prev_summary)  # Don't add @handle prefix
+    # Get latest summary from database (if exists) for context
+    latest_summary_obj = get_latest_summary()
+    combined_previous_summary = latest_summary_obj.get("summary", "") if latest_summary_obj else ""
     
-    combined_previous_summary = "\n\n".join(previous_summaries) if previous_summaries else ""
-    
-    log(f"[DEBUG] combined_previous_summary length: {len(combined_previous_summary)}")
+    log(f"[DEBUG] latest_summary from database length: {len(combined_previous_summary)}")
     log(f"[DEBUG] Total new tweets collected: {len(all_new_tweets)}")
     
     # Helper function to clean old summary format
@@ -1046,7 +1053,8 @@ async def refresh_brief(response: Response):
         if tweet_id:
             tweet_ids.append(str(tweet_id))
     
-    # Save summary to database
+    # Save summary to database and update account tracking
+    summary_id = None
     if cleaned_new_summary and cleaned_new_summary.strip():
         try:
             summary_id = save_summary(
@@ -1060,9 +1068,11 @@ async def refresh_brief(response: Response):
             import traceback
             traceback.print_exc(file=log_file)
     
-    # Update session context for all accounts with the cleaned summary and latest tweet IDs
-    for handle in accounts:
-        update_session_context(handle, cleaned_new_summary, account_last_tweet_ids.get(handle))
+    # Update account tracking for all accounts with latest tweet IDs and summary ID
+    # Note: We don't store previous_summary anymore - it's fetched from summaries table
+    if summary_id:
+        for handle in accounts:
+            update_account_tracking(handle, last_tweet_id=account_last_tweet_ids.get(handle), last_summary_id=summary_id)
     
     log(f"[DEBUG] Returning RefreshResponse with summary length: {len(cleaned_new_summary)}")
     
@@ -1157,17 +1167,11 @@ async def refresh_brief_dev(response: Response):
     
     log(f"[DEBUG] Total tweets from sample data: {len(all_new_tweets)}")
     
-    # Get combined previous summary
-    previous_summaries = []
-    for handle in accounts:
-        context = get_session_context(handle)
-        prev_summary = context.get("previous_summary", "")
-        if prev_summary:
-            previous_summaries.append(prev_summary)
+    # Get latest summary from database (if exists) for context
+    latest_summary_obj = get_latest_summary()
+    combined_previous_summary = latest_summary_obj.get("summary", "") if latest_summary_obj else ""
     
-    combined_previous_summary = "\n\n".join(previous_summaries) if previous_summaries else ""
-    
-    log(f"[DEBUG] combined_previous_summary length: {len(combined_previous_summary)}")
+    log(f"[DEBUG] latest_summary from database length: {len(combined_previous_summary)}")
     log(f"[DEBUG] Total new tweets collected: {len(all_new_tweets)}")
     
     # Helper function to clean old summary format
@@ -1214,9 +1218,29 @@ async def refresh_brief_dev(response: Response):
     # Clean the new summary before saving
     cleaned_new_summary = clean_summary(new_summary)
     
-    # Update session context for all accounts with the cleaned summary and latest tweet IDs
-    for handle in accounts:
-        update_session_context(handle, cleaned_new_summary, account_last_tweet_ids.get(handle))
+    # Extract tweet IDs from the fetched tweets
+    tweet_ids = []
+    for tweet in all_new_tweets:
+        tweet_id = tweet.get("id_str") or tweet.get("id")
+        if tweet_id:
+            tweet_ids.append(str(tweet_id))
+    
+    # Save summary to database and update account tracking
+    summary_id = None
+    if cleaned_new_summary and cleaned_new_summary.strip():
+        try:
+            summary_id = save_summary(cleaned_new_summary, tweet_ids, datetime.now().isoformat())
+            log(f"[DEBUG] Saved summary to database with ID: {summary_id}, tweet_ids: {len(tweet_ids)}")
+        except Exception as e:
+            log(f"[ERROR] Failed to save summary to database: {e}")
+            import traceback
+            traceback.print_exc(file=log_file)
+    
+    # Update account tracking for all accounts with latest tweet IDs and summary ID
+    # Note: We don't store previous_summary anymore - it's fetched from summaries table
+    if summary_id:
+        for handle in accounts:
+            update_account_tracking(handle, last_tweet_id=account_last_tweet_ids.get(handle), last_summary_id=summary_id)
     
     log(f"[DEBUG] Returning RefreshResponse with summary length: {len(cleaned_new_summary)}")
     log(f"[DEBUG] ========== /refresh-brief-dev COMPLETED ==========")
