@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Signal Aggregator</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 300px 1fr 600px;
+            gap: 0;
+            min-height: 600px;
+        }
+
+        .sidebar {
+            background: #f8f9fa;
+            padding: 30px;
+            border-right: 1px solid #e0e0e0;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+
+        .sidebar h2 {
+            font-size: 1.3em;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .account-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            align-items: stretch;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .account-input-group input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        
+        .account-input-group .btn {
+            white-space: nowrap;
+            flex-shrink: 0;
+            padding: 12px 16px;
+            box-sizing: border-box;
+        }
+
+        .account-input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-large {
+            padding: 18px 36px;
+            font-size: 16px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .accounts-list {
+            list-style: none;
+        }
+
+        .accounts-list li {
+            padding: 12px;
+            background: white;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .accounts-list li span {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .main-content {
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        .chat-sidebar {
+            background: #f8f9fa;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .refresh-section {
+            margin-bottom: 30px;
+        }
+
+        .summary-display {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 0;
+            overflow-y: auto;
+            max-height: 800px;
+            border: 2px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Tab Styles */
+        .summary-tabs {
+            display: flex;
+            background: white;
+            border-bottom: 2px solid #e0e0e0;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .summary-tab {
+            flex: 1;
+            padding: 16px 24px;
+            background: #f8f9fa;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .summary-tab:first-child {
+            border-radius: 8px 0 0 0;
+        }
+
+        .summary-tab:last-child {
+            border-radius: 0 8px 0 0;
+        }
+
+        .summary-tab:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .summary-tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Expandable Insight Cards */
+        .insight-card {
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+
+        .insight-card:hover {
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .insight-header {
+            padding: 20px 24px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .insight-header:hover {
+            background: linear-gradient(135deg, #f0f0f0 0%, #f8f9fa 100%);
+        }
+
+        .insight-title {
+            flex: 1;
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .insight-toggle {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #667eea;
+            font-size: 18px;
+            transition: transform 0.3s ease;
+            flex-shrink: 0;
+            margin-left: 16px;
+        }
+
+        .insight-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .insight-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-out, padding 0.4s ease-out, opacity 0.3s ease-out;
+            opacity: 0;
+            padding: 0 24px;
+        }
+
+        .insight-content.expanded {
+            max-height: 5000px;
+            padding: 20px 24px;
+            opacity: 1;
+            border-top: 1px solid #e0e0e0;
+            background: #fafafa;
+        }
+
+        .insight-content p {
+            margin: 0 0 12px 0;
+            color: #555;
+            line-height: 1.7;
+        }
+
+        .insight-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .insight-content ul {
+            margin: 12px 0;
+            padding-left: 24px;
+        }
+
+        .insight-content li {
+            margin-bottom: 8px;
+            color: #555;
+            line-height: 1.7;
+        }
+
+        /* Source Tags */
+        .source-tags {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .source-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+        }
+
+        .source-tag:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+            text-decoration: none;
+            color: white;
+        }
+
+        .source-tag::before {
+            content: "🔗 ";
+            margin-right: 4px;
+        }
+
+        /* Load More Button */
+        .load-more-button {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            margin: 30px auto;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            text-transform: none;
+            letter-spacing: 0.5px;
+        }
+
+        .load-more-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, #5568d3 0%, #653a8a 100%);
+        }
+
+        .load-more-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .load-more-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+            opacity: 0.6;
+        }
+
+        .summary-display.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-style: italic;
+        }
+
+        .summary-content {
+            line-height: 1.8;
+            color: #333;
+        }
+
+        .summary-content h1,
+        .summary-content h2,
+        .summary-content h3 {
+            margin-top: 24px;
+            margin-bottom: 12px;
+            color: #667eea;
+        }
+
+        .summary-content h2 {
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+
+        .summary-content p {
+            margin-bottom: 12px;
+        }
+
+        .summary-content ul,
+        .summary-content ol {
+            margin-left: 24px;
+            margin-bottom: 12px;
+        }
+
+        .summary-content li {
+            margin-bottom: 8px;
+        }
+
+        .summary-content strong {
+            color: #764ba2;
+        }
+
+        /* Zeno-inspired card-based section styling */
+        .summary-section-card {
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            margin: 24px 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e0e0e0;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+
+        .summary-section-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            padding: 20px 24px;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px solid #e0e0e0;
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        }
+
+        .section-header:hover {
+            background: linear-gradient(135deg, #f0f0f0 0%, #f8f9fa 100%);
+        }
+
+        .section-icon {
+            width: 40px;
+            height: 40px;
+            margin-right: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .section-title-group {
+            flex: 1;
+        }
+
+        .section-label {
+            font-size: 0.7em;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #999;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .section-title {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #333;
+            margin: 0;
+        }
+
+        .section-toggle {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #667eea;
+            font-size: 16px;
+            transition: transform 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .section-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .section-content {
+            padding: 24px;
+            max-height: 5000px;
+            overflow: hidden;
+            transition: max-height 0.4s ease-out, padding 0.4s ease-out, opacity 0.3s ease-out;
+            opacity: 1;
+        }
+
+        .section-content.collapsed {
+            max-height: 0;
+            padding: 0 24px;
+            overflow: hidden;
+            opacity: 0;
+        }
+
+        /* Section-specific styling */
+        .actionable-section .section-icon {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .actionable-section .section-header {
+            border-left: 4px solid #667eea;
+        }
+
+        .ticker-section .section-icon {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+
+        .ticker-section .section-header {
+            border-left: 4px solid #4CAF50;
+        }
+
+        .trading-strategy-section .section-icon {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+        }
+
+        .trading-strategy-section .section-header {
+            border-left: 4px solid #ff9800;
+        }
+
+        .market-context-section .section-icon {
+            background: linear-gradient(135deg, #757575 0%, #616161 100%);
+            color: white;
+        }
+
+        .market-context-section .section-header {
+            border-left: 4px solid #757575;
+        }
+
+        .ticker-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-weight: 600;
+            display: inline-block;
+            margin: 2px 4px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+        }
+
+        /* Improved list styling within sections */
+        .section-content ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .section-content li {
+            background: #f8f9fa;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+        }
+
+        .section-content li:hover {
+            background: #f0f0f0;
+            transform: translateX(4px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Ticker list items */
+        .ticker-section .section-content li {
+            border-left-color: #4CAF50;
+        }
+
+        /* Trading strategy list items */
+        .trading-strategy-section .section-content li {
+            border-left-color: #ff9800;
+            background: #fff8f0;
+        }
+
+        .trading-strategy-section .section-content li:hover {
+            background: #fff3e0;
+        }
+
+        /* Chatbox Styles */
+        .chat-container {
+            background: white;
+            border-radius: 0;
+            box-shadow: none;
+            border: none;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            margin-top: 0;
+        }
+
+        .chat-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e0e0e0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .chat-header-icon {
+            font-size: 24px;
+        }
+
+        .chat-header-title {
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            min-height: 200px;
+        }
+
+        .chat-message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-message.user {
+            align-items: flex-end;
+        }
+
+        .chat-message.assistant {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .chat-message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-message.assistant .message-bubble {
+            background: #f0f0f0;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: none;
+            font-family: inherit;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .chat-send-button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .chat-send-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .chat-send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #999;
+            font-size: 0.9em;
+        }
+
+        .chat-loading-dots {
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .chat-loading-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #667eea;
+            animation: chat-bounce 1.4s infinite ease-in-out both;
+        }
+
+        .chat-loading-dots span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .chat-loading-dots span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes chat-bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        /* Legacy section classes - styles now handled by .summary-section-card */
+
+        .loading {
+            text-align: center;
+            color: #667eea;
+            font-weight: 600;
+            padding: 20px;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #c33;
+        }
+
+        @media (max-width: 1200px) {
+            .content {
+                grid-template-columns: 300px 1fr;
+            }
+            
+            .chat-sidebar {
+                display: none;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            
+            .chat-sidebar {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span id="headerEmoji"></span> Financial Signal Aggregator</h1>
+            <p>Track FinTwit influencers for actionable market insights</p>
+        </div>
+
+        <div class="content">
+            <div class="sidebar">
+                <h2>Monitored Accounts</h2>
+                <div class="account-input-group">
+                    <input type="text" id="accountInput" placeholder="@username" />
+                    <button class="btn btn-primary" onclick="addAccount()">Add</button>
+                </div>
+                <ul class="accounts-list" id="accountsList"></ul>
+            </div>
+
+            <div class="main-content">
+                <div class="refresh-section">
+                    <button class="btn btn-primary btn-large" onclick="refreshBrief()" id="refreshButton">
+                        <span id="refreshEmoji"></span> Refresh Market Intel
+                    </button>
+                    <button class="btn btn-primary btn-large" onclick="refreshBriefDev()" id="refreshDevButton" style="background: #ff9800; margin-top: 10px;">
+                        🧪 Refresh Market Intel (Dev - Uses Sample Data)
+                    </button>
+                    <button class="btn btn-primary btn-large" onclick="refreshBriefUIDev()" id="refreshUIDevButton" style="background: #9c27b0; margin-top: 10px;">
+                        🎨 UI Dev - Load Saved Summary (No API Calls)
+                    </button>
+                    <div id="errorMessage"></div>
+                </div>
+                <div class="summary-display empty" id="summaryDisplay">
+                    Click "Refresh Market Intel" to generate your financial summary
+                </div>
+            </div>
+
+            <!-- Chatbox Sidebar -->
+            <div class="chat-sidebar">
+                <div class="chat-container" id="chatContainer">
+                    <div class="chat-header">
+                        <div class="chat-header-icon">💬</div>
+                        <div class="chat-header-title">Ask about the Summary</div>
+                    </div>
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-message assistant">
+                            <div class="message-bubble">
+                                Hi! I'm your AI assistant. Ask me anything about the financial summary. For example, you can ask me to explain trading strategies, tickers, or market insights in more detail.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <textarea 
+                            class="chat-input" 
+                            id="chatInput" 
+                            placeholder="Ask a question about the summary (e.g., 'Explain the butterfly strategy')"
+                            rows="1"
+                            onkeydown="handleChatKeyDown(event)"
+                        ></textarea>
+                        <button class="chat-send-button" id="chatSendButton" onclick="sendChatMessage()">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use port 8002 for API calls
+        const API_BASE = window.location.protocol + '//' + window.location.hostname + ':8002';
+        
+        // Global state for pagination
+        let currentOffset = 0;
+        let currentItemType = 'all'; // 'all', 'news', 'trades'
+        let totalItems = 0;
+        let showingHistorical = false;
+
+        // Load accounts on page load
+        async function loadAccounts() {
+            try {
+                const response = await fetch(`${API_BASE}/manage-accounts`);
+                const data = await response.json();
+                displayAccounts(data.accounts);
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+            }
+        }
+
+        function displayAccounts(accounts) {
+            const list = document.getElementById('accountsList');
+            list.innerHTML = '';
+            
+            if (accounts.length === 0) {
+                list.innerHTML = '<li style="color: #999; font-style: italic;">No accounts added yet</li>';
+                return;
+            }
+
+            accounts.forEach(account => {
+                const handle = account.handle || account; // Support both old format (string) and new format (object)
+                const username = account.username || account.name || null;
+                
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <div style="display: flex; flex-direction: column; flex: 1;">
+                        ${username ? `<span style="font-weight: 600; color: #333;">${username}</span>` : ''}
+                        <span style="color: #666; font-size: 0.9em;">@${handle}</span>
+                    </div>
+                    <button class="btn btn-danger" onclick="removeAccount('${handle}')">Remove</button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        async function addAccount() {
+            const input = document.getElementById('accountInput');
+            const handle = input.value.trim();
+            
+            if (!handle) {
+                alert('Please enter a Twitter handle');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/manage-accounts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ handle: handle })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    displayAccounts(data.accounts);
+                    input.value = '';
+                    clearError();
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to add account');
+                }
+            } catch (error) {
+                showError('Error adding account: ' + error.message);
+            }
+        }
+
+        async function removeAccount(handle) {
+            try {
+                const response = await fetch(`${API_BASE}/manage-accounts/${handle}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    displayAccounts(data.accounts);
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to remove account');
+                }
+            } catch (error) {
+                showError('Error removing account: ' + error.message);
+            }
+        }
+
+        async function refreshBrief() {
+            const display = document.getElementById('summaryDisplay');
+            const refreshEmoji = String.fromCodePoint(0x1F504);
+            display.innerHTML = '<div class="loading">' + refreshEmoji + ' Fetching tweets and generating summary...</div>';
+            display.classList.remove('empty');
+            clearError();
+
+            try {
+                // Create abort controller for timeout (5 minutes)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+                
+                const response = await fetch(`${API_BASE}/refresh-brief`, {
+                    method: 'POST',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('[DEBUG] API response received:', data);
+                    // After generating summary, load merged items
+                    await renderMergedItems('all', 0, false);
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to refresh brief');
+                    display.innerHTML = '<div class="summary-display empty">Error generating summary</div>';
+                    display.classList.add('empty');
+                }
+            } catch (error) {
+                showError('Error refreshing brief: ' + error.message);
+                display.innerHTML = '<div class="summary-display empty">Error generating summary</div>';
+                display.classList.add('empty');
+            }
+        }
+
+        async function refreshBriefDev() {
+            const display = document.getElementById('summaryDisplay');
+            const refreshEmoji = String.fromCodePoint(0x1F9EA);
+            display.innerHTML = '<div class="loading">' + refreshEmoji + ' Using sample data to generate summary...</div>';
+            display.classList.remove('empty');
+            clearError();
+
+            try {
+                // Create abort controller for timeout (5 minutes)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+                
+                const response = await fetch(`${API_BASE}/refresh-brief-dev`, {
+                    method: 'POST',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('[DEBUG] Dev API response received:', data);
+                    // After generating summary, load merged items
+                    await renderMergedItems('all', 0, false);
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to refresh brief (dev mode)');
+                    display.innerHTML = '<div class="summary-display empty">Error generating summary</div>';
+                    display.classList.add('empty');
+                }
+            } catch (error) {
+                showError('Error refreshing brief (dev mode): ' + error.message);
+                display.innerHTML = '<div class="summary-display empty">Error generating summary</div>';
+                display.classList.add('empty');
+            }
+        }
+
+        function parseSummarySections(markdown) {
+            // Parse markdown to extract sections
+            const sections = {
+                news: '',
+                trades: ''
+            };
+
+            // Split by h2 headers - updated section names
+            const newsRegex = /##\s*News\s*\n([\s\S]*?)(?=##|$)/i;
+            const tradesRegex = /##\s*Trades\s*\n([\s\S]*?)(?=##|$)/i;
+            
+            // Also support old section names for backward compatibility
+            const actionableRegex = /##\s*Actionable\s*Insights\s*\n([\s\S]*?)(?=##|$)/i;
+            const strategiesRegex = /##\s*Trading\s*Strategies\s*\n([\s\S]*?)(?=##|$)/i;
+
+            const newsMatch = markdown.match(newsRegex);
+            const tradesMatch = markdown.match(tradesRegex);
+            const actionableMatch = markdown.match(actionableRegex);
+            const strategiesMatch = markdown.match(strategiesRegex);
+
+            if (newsMatch) {
+                sections.news = newsMatch[1].trim();
+            } else if (actionableMatch) {
+                // Fallback to old section name
+                sections.news = actionableMatch[1].trim();
+            }
+            
+            if (tradesMatch) {
+                sections.trades = tradesMatch[1].trim();
+            } else if (strategiesMatch) {
+                // Fallback to old section name
+                sections.trades = strategiesMatch[1].trim();
+            }
+
+            return sections;
+        }
+
+        function renderSummary(markdown) {
+            const display = document.getElementById('summaryDisplay');
+            
+            if (!markdown || markdown.trim() === '') {
+                display.innerHTML = '<div class="summary-display empty">No summary available</div>';
+                display.classList.add('empty');
+                return;
+            }
+
+            // Parse sections
+            const sections = parseSummarySections(markdown);
+            
+            // Debug: Log parsed sections
+            console.log('[DEBUG] Parsed sections:', {
+                newsLength: sections.news ? sections.news.length : 0,
+                tradesLength: sections.trades ? sections.trades.length : 0,
+                newsPreview: sections.news ? sections.news.substring(0, 100) : 'EMPTY',
+                tradesPreview: sections.trades ? sections.trades.substring(0, 100) : 'EMPTY'
+            });
+
+            // Convert markdown sections to HTML
+            function processMarkdown(text, useTickerBadges = false) {
+                if (!text) return '';
+                
+                // First, ensure tickers in markdown are bolded (before parsing)
+                // Replace $TICKER with **$TICKER** if not already wrapped in **
+                let processedText = text.replace(/\$([A-Z]{1,5})\b/g, (match, ticker) => {
+                    // Check if this ticker is already wrapped in **
+                    const beforeMatch = text.substring(0, text.indexOf(match));
+                    const afterMatch = text.substring(text.indexOf(match) + match.length);
+                    
+                    // Check if there's ** before and after (but not too far)
+                    const beforeBold = beforeMatch.lastIndexOf('**');
+                    const afterBold = afterMatch.indexOf('**');
+                    
+                    // If we're already inside **...**, don't modify
+                    if (beforeBold !== -1 && afterBold !== -1 && 
+                        beforeMatch.substring(beforeBold + 2).indexOf('**') === -1) {
+                        return match;
+                    }
+                    
+                    // Wrap in bold markdown
+                    return `**$${ticker}**`;
+                });
+                
+                // Parse markdown to HTML
+                let html = marked.parse(processedText);
+                
+                // Only add ticker badges if requested (for tickers tab)
+                if (useTickerBadges) {
+                    // Replace <strong>$TICKER</strong> with ticker badge
+                    html = html.replace(/<strong>\$([A-Z]{1,5})<\/strong>/g, (match, ticker) => {
+                        return `<span class="ticker-badge">$${ticker}</span>`;
+                    });
+                }
+                
+                return html;
+            }
+
+            // Parse actionable insights into expandable cards
+            function parseActionableInsights(text, tabPrefix = '') {
+                if (!text) return '';
+                
+                const insights = [];
+                const lines = text.split('\n');
+                let currentInsight = { title: '', content: '' };
+                
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i].trim();
+                    if (!line) {
+                        // Empty line - continue current insight content
+                        if (currentInsight.title) {
+                            currentInsight.content += '\n';
+                        }
+                        continue;
+                    }
+                    
+                    // Check if this is a new insight (starts with - or * followed by text)
+                    const bulletMatch = line.match(/^[-*]\s*(.+)$/);
+                    if (bulletMatch) {
+                        const content = bulletMatch[1].trim();
+                        
+                        // Save previous insight if it exists
+                        if (currentInsight.title) {
+                            insights.push(currentInsight);
+                        }
+                        
+                        // Try to extract title (everything before colon, or first sentence)
+                        // Pattern 1: Bold title with colon: **Title**: content
+                        let titleMatch = content.match(/^\*\*(.+?)\*\*:\s+(.+)$/);
+                        if (titleMatch && titleMatch[2].trim().length > 10) {
+                            // Ensure we have actual content after colon
+                            currentInsight = {
+                                title: titleMatch[1].trim(), // Extract text without **
+                                content: titleMatch[2].trim() + '\n'
+                            };
+                        } else {
+                            // Pattern 1b: Handle malformed bold like ***Title**: or **Title*:
+                            titleMatch = content.match(/^\*{2,3}(.+?)\*{1,2}:\s+(.+)$/);
+                            if (titleMatch && titleMatch[2].trim().length > 10) {
+                                currentInsight = {
+                                    title: titleMatch[1].trim(),
+                                    content: titleMatch[2].trim() + '\n'
+                                };
+                            } else {
+                                // Pattern 2: Regular title with colon: Title: content
+                                // CRITICAL: Require space after colon and ensure content exists
+                                // This prevents titles from including content when there's no proper separator
+                                titleMatch = content.match(/^(.+?):\s+(.+)$/);
+                                if (titleMatch && titleMatch[1].trim().length > 0 && titleMatch[2].trim().length > 10) {
+                                    // Ensure we have actual content after colon (at least 10 chars)
+                                    // Limit title length to prevent overly long titles
+                                    let cleanTitle = titleMatch[1].trim();
+                                    // Remove surrounding asterisks but preserve internal formatting like **$TICKER**
+                                    cleanTitle = cleanTitle.replace(/^[*]+|[*]+$/g, ''); // Remove leading/trailing asterisks
+                                    // Limit title to news headline length (80 chars max)
+                                    if (cleanTitle.length > 80) {
+                                        cleanTitle = cleanTitle.substring(0, 77) + '...';
+                                    }
+                                    currentInsight = {
+                                        title: cleanTitle,
+                                        content: titleMatch[2].trim() + '\n' // Everything after colon goes to content
+                                    };
+                                } else {
+                                    // Pattern 3: No colon, use first part as title (up to 100 chars or first sentence)
+                                    const sentenceEnd = content.match(/^(.+?[.!?])\s+(.+)$/);
+                                    if (sentenceEnd && sentenceEnd[1].length < 150) {
+                                        let cleanTitle = sentenceEnd[1].trim();
+                                        cleanTitle = cleanTitle.replace(/^[*]+|[*]+$/g, ''); // Remove leading/trailing asterisks
+                                        currentInsight = {
+                                            title: cleanTitle,
+                                            content: sentenceEnd[2].trim() + '\n'
+                                        };
+                                    } else {
+                                        // Use first 100 chars as title
+                                        let title = content.length > 100 ? content.substring(0, 100).trim() + '...' : content;
+                                        title = title.replace(/^[*]+|[*]+$/g, ''); // Remove leading/trailing asterisks
+                                        currentInsight = {
+                                            title: title,
+                                            content: content.length > 100 ? content.substring(100).trim() + '\n' : ''
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Continuation of current insight
+                        if (currentInsight.title) {
+                            currentInsight.content += line + '\n';
+                        }
+                    }
+                }
+                
+                // Add last insight
+                if (currentInsight.title) {
+                    insights.push(currentInsight);
+                }
+                
+                // Generate HTML for expandable cards
+                console.log(`[DEBUG] parseActionableInsights: Found ${insights.length} insights from text length ${text ? text.length : 0}`);
+                if (insights.length === 0) {
+                    console.warn('[WARNING] No insights parsed, falling back to processMarkdown. Text preview:', text ? text.substring(0, 200) : 'EMPTY');
+                    return processMarkdown(text, false); // Fallback to original if parsing fails
+                }
+                
+                let html = '';
+                insights.forEach((insight, index) => {
+                    // Debug: Log insight data
+                    console.log(`[DEBUG] Insight ${index}:`, {
+                        title: insight.title,
+                        contentLength: insight.content ? insight.content.length : 0,
+                        contentPreview: insight.content ? insight.content.substring(0, 100) : 'EMPTY'
+                    });
+                    
+                    // Don't use ticker badges in actionable insights - just bold formatting
+                    let contentHtml = processMarkdown(insight.content.trim(), false);
+                    
+                    // Debug: Log processed content
+                    console.log(`[DEBUG] Insight ${index} processed content length:`, contentHtml ? contentHtml.length : 0);
+                    console.log(`[DEBUG] Insight ${index} processed content preview:`, contentHtml ? contentHtml.substring(0, 200) : 'EMPTY');
+                    
+                    // Process title: strip markdown formatting and then re-apply bold for tickers
+                    let titleText = insight.title.trim();
+                    // Remove any leading/trailing markdown asterisks or dashes
+                    titleText = titleText.replace(/^[-*]\s*/, ''); // Remove leading bullet
+                    titleText = titleText.replace(/^\*\*|\*\*$/g, ''); // Remove surrounding **
+                    titleText = titleText.replace(/^\*|\*$/g, ''); // Remove surrounding *
+                    // Process markdown to convert any remaining markdown (like **$TICKER**) to HTML
+                    const titleHtml = processMarkdown(titleText, false);
+                    
+                    // Extract and format source tags from BOTH title and content
+                    // Look for markdown links like [Source: @handle](url) or [Source: @handle1, @handle2](url)
+                    const sourceTagRegex = /\[Source:\s*([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
+                    const sourceTags = [];
+                    let match;
+                    
+                    // First, extract from content
+                    while ((match = sourceTagRegex.exec(insight.content)) !== null) {
+                        const handles = match[1].split(',').map(h => h.trim().replace('@', ''));
+                        const url = match[2];
+                        // If multiple handles, use first URL for all (or we could try to match URLs)
+                        handles.forEach(handle => {
+                            sourceTags.push({
+                                handle: handle,
+                                url: url
+                            });
+                        });
+                    }
+                    
+                    // Also extract from title (in case source tag is in title)
+                    // Create a new regex instance for title search (regex with global flag needs reset)
+                    const titleSourceRegex = /\[Source:\s*([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
+                    let titleMatch;
+                    while ((titleMatch = titleSourceRegex.exec(insight.title)) !== null) {
+                        const handles = titleMatch[1].split(',').map(h => h.trim().replace('@', ''));
+                        const url = titleMatch[2];
+                        handles.forEach(handle => {
+                            // Only add if not already present
+                            if (!sourceTags.some(t => t.handle.toLowerCase() === handle.toLowerCase() && t.url === url)) {
+                                sourceTags.push({
+                                    handle: handle,
+                                    url: url
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Also look for plain text sources like "Source: @handle" and try to extract URLs
+                    // This is a fallback if LLM doesn't format properly
+                    const plainSourceRegex = /Source:\s*@(\w+)/gi;
+                    let plainMatch;
+                    const seenHandles = new Set(sourceTags.map(t => t.handle.toLowerCase()));
+                    while ((plainMatch = plainSourceRegex.exec(insight.content)) !== null) {
+                        const handle = plainMatch[1];
+                        if (!seenHandles.has(handle.toLowerCase())) {
+                            // Try to find URL nearby (within 200 chars)
+                            const searchStart = Math.max(0, plainMatch.index - 200);
+                            const searchEnd = Math.min(insight.content.length, plainMatch.index + 200);
+                            const nearbyText = insight.content.substring(searchStart, searchEnd);
+                            const urlMatch = nearbyText.match(/(https?:\/\/[^\s\)]+)/);
+                            if (urlMatch) {
+                                sourceTags.push({
+                                    handle: handle,
+                                    url: urlMatch[1]
+                                });
+                                seenHandles.add(handle.toLowerCase());
+                            }
+                        }
+                    }
+                    
+                    // Remove source tags from content HTML (they'll be added separately)
+                    contentHtml = contentHtml.replace(/<a[^>]*>\[Source:[^\]]+\]<\/a>/gi, '');
+                    contentHtml = contentHtml.replace(/\[Source:[^\]]+\]\(https?:\/\/[^\)]+\)/gi, '');
+                    contentHtml = contentHtml.replace(/Source:\s*@\w+/gi, '');
+                    
+                    // Generate source tags HTML
+                    let sourceTagsHtml = '';
+                    if (sourceTags.length > 0) {
+                        sourceTagsHtml = '<div class="source-tags">';
+                        sourceTags.forEach(tag => {
+                            sourceTagsHtml += `<a href="${tag.url}" target="_blank" rel="noopener noreferrer" class="source-tag">@${tag.handle}</a>`;
+                        });
+                        sourceTagsHtml += '</div>';
+                        console.log(`[DEBUG] Insight ${index} source tags found:`, sourceTags.length, sourceTags);
+                    } else {
+                        console.warn(`[WARNING] Insight ${index} "${insight.title}" has NO source tags!`, {
+                            contentPreview: insight.content ? insight.content.substring(0, 300) : 'EMPTY'
+                        });
+                    }
+                    
+                    // Debug: Log if content is empty
+                    if (!contentHtml || contentHtml.trim().length === 0) {
+                        console.warn(`[WARNING] Insight ${index} "${insight.title}" has empty content!`, {
+                            originalContent: insight.content ? insight.content.substring(0, 200) : 'EMPTY',
+                            contentHtmlLength: contentHtml ? contentHtml.length : 0
+                        });
+                    }
+                    
+                    const uniqueId = tabPrefix ? `${tabPrefix}-insight-${index}` : `insight-${index}`;
+                    html += `
+                        <div class="insight-card">
+                            <div class="insight-header" onclick="toggleInsight('${uniqueId}')">
+                                <div class="insight-title">${titleHtml}</div>
+                                <div class="insight-toggle">▼</div>
+                            </div>
+                            <div class="insight-content" id="${uniqueId}">
+                                ${contentHtml || '<p style="color: #999; font-style: italic;">No additional details available.</p>'}
+                                ${sourceTagsHtml || '<p style="color: #999; font-size: 12px; margin-top: 10px; font-style: italic;">No source tags found.</p>'}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                return html;
+            }
+
+            const newsHtml = parseActionableInsights(sections.news, 'news');
+            console.log('[DEBUG] News HTML length:', newsHtml ? newsHtml.length : 0);
+            
+            const tradesHtml = parseActionableInsights(sections.trades, 'trades'); // Use same parsing for trades
+            console.log('[DEBUG] Trades HTML length:', tradesHtml ? tradesHtml.length : 0);
+            console.log('[DEBUG] Trades HTML preview:', tradesHtml ? tradesHtml.substring(0, 200) : 'EMPTY');
+
+            // Build tabbed interface
+            let tabsHtml = '<div class="summary-tabs">';
+            tabsHtml += '<button class="summary-tab active" onclick="switchTab(\'news\'); return false;">📰 News</button>';
+            tabsHtml += '<button class="summary-tab" onclick="switchTab(\'trades\'); return false;">💰 Trades</button>';
+            tabsHtml += '</div>';
+
+            let contentHtml = '<div class="tab-content active" id="tab-news">';
+            if (newsHtml) {
+                contentHtml += `<div class="summary-content">${newsHtml}</div>`;
+            } else {
+                contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">No news available.</p></div>';
+            }
+            contentHtml += '</div>';
+
+            contentHtml += '<div class="tab-content" id="tab-trades">';
+            if (tradesHtml) {
+                contentHtml += `<div class="summary-content">${tradesHtml}</div>`;
+                console.log('[DEBUG] Trades tab content added, HTML length:', tradesHtml.length);
+            } else {
+                console.warn('[WARNING] tradesHtml is empty!');
+                contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">No specific trades mentioned in recent tweets.</p></div>';
+            }
+            contentHtml += '</div>';
+
+            console.log('[DEBUG] Final contentHtml length:', contentHtml.length);
+            display.innerHTML = tabsHtml + contentHtml;
+            
+            // Verify trades tab was created
+            const tradesTabElement = document.getElementById('tab-trades');
+            if (tradesTabElement) {
+                console.log('[DEBUG] Trades tab element found after render, innerHTML length:', tradesTabElement.innerHTML.length);
+                console.log('[DEBUG] Trades tab element classes:', tradesTabElement.className);
+            } else {
+                console.error('[ERROR] Trades tab element NOT found after render!');
+            }
+            display.classList.remove('empty');
+            
+            // Store summary for chat context
+            window.currentSummary = markdown;
+        }
+        
+        // Format timestamp to relative time or date
+        function formatTimestamp(timestampStr) {
+            if (!timestampStr) return '';
+            
+            try {
+                const timestamp = new Date(timestampStr);
+                const now = new Date();
+                const diffMs = now - timestamp;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+                
+                if (diffMins < 1) {
+                    return 'just now';
+                } else if (diffMins < 60) {
+                    return `${diffMins}min ago`;
+                } else if (diffHours < 24) {
+                    return `${diffHours}h ago`;
+                } else if (diffDays < 1) {
+                    return '1d ago';
+                } else {
+                    // Format as YYYY/MM/DD
+                    const year = timestamp.getFullYear();
+                    const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+                    const day = String(timestamp.getDate()).padStart(2, '0');
+                    return `${year}/${month}/${day}`;
+                }
+            } catch (e) {
+                console.error('Error formatting timestamp:', e);
+                return '';
+            }
+        }
+        
+        // Format absolute timestamp for display
+        function formatAbsoluteTimestamp(timestampStr) {
+            if (!timestampStr) return '';
+            
+            try {
+                const timestamp = new Date(timestampStr);
+                return timestamp.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                });
+            } catch (e) {
+                console.error('Error formatting absolute timestamp:', e);
+                return timestampStr;
+            }
+        }
+        
+        // Fetch and render merged items
+        async function renderMergedItems(itemType = 'all', offset = 0, append = false) {
+            const display = document.getElementById('summaryDisplay');
+            
+            if (!append) {
+                display.innerHTML = '<div class="loading">📊 Loading news and trades...</div>';
+                display.classList.remove('empty');
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('[DEBUG] Merged items response:', data);
+                
+                // Backend returns {news: [...], trades: [...], total_news: ..., total_trades: ...}
+                const newsItems = data.news || [];
+                const tradesItems = data.trades || [];
+                const totalNews = data.total_news || 0;
+                const totalTrades = data.total_trades || 0;
+                
+                // Calculate total items based on item_type
+                if (itemType === 'news') {
+                    totalItems = totalNews;
+                } else if (itemType === 'trades') {
+                    totalItems = totalTrades;
+                } else {
+                    totalItems = totalNews + totalTrades;
+                }
+                
+                currentOffset = offset;
+                currentItemType = itemType;
+                
+                // Render items
+                if (!append) {
+                    // Initial render - create tab structure
+                    let tabsHtml = '<div class="summary-tabs">';
+                    tabsHtml += '<button class="summary-tab active" onclick="switchTab(\'news\'); return false;">📰 News</button>';
+                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'trades\'); return false;">💰 Trades</button>';
+                    tabsHtml += '</div>';
+                    
+                    let contentHtml = '<div class="tab-content active" id="tab-news">';
+                    contentHtml += renderItemsList(newsItems, 'news');
+                    contentHtml += '</div>';
+                    
+                    contentHtml += '<div class="tab-content" id="tab-trades">';
+                    contentHtml += renderItemsList(tradesItems, 'trades');
+                    contentHtml += '</div>';
+                    
+                    display.innerHTML = tabsHtml + contentHtml;
+                } else {
+                    // Append to existing lists
+                    const newsTab = document.getElementById('tab-news');
+                    const tradesTab = document.getElementById('tab-trades');
+                    
+                    if (newsTab && newsItems.length > 0) {
+                        const newsList = newsTab.querySelector('.summary-content');
+                        if (newsList) {
+                            newsList.innerHTML += renderItemsList(newsItems, 'news', true);
+                        }
+                    }
+                    
+                    if (tradesTab && tradesItems.length > 0) {
+                        const tradesList = tradesTab.querySelector('.summary-content');
+                        if (tradesList) {
+                            tradesList.innerHTML += renderItemsList(tradesItems, 'trades', true);
+                        }
+                    }
+                }
+                
+                // Add "Load More" button if there are more items
+                // For "all" type, check if there are more news OR trades
+                let hasMore = false;
+                if (itemType === 'news') {
+                    hasMore = (offset + 10) < totalNews;
+                } else if (itemType === 'trades') {
+                    hasMore = (offset + 10) < totalTrades;
+                } else {
+                    // For "all", check if there are more items in either category
+                    hasMore = (offset + 10) < totalNews || (offset + 10) < totalTrades;
+                }
+                
+                if (hasMore && !append) {
+                    // Add load more button to both tabs
+                    const newsTab = document.getElementById('tab-news');
+                    const tradesTab = document.getElementById('tab-trades');
+                    
+                    if (newsTab) {
+                        const loadMoreBtn = document.createElement('button');
+                        loadMoreBtn.className = 'load-more-button';
+                        loadMoreBtn.textContent = 'Load More';
+                        loadMoreBtn.onclick = () => loadMoreItems();
+                        newsTab.appendChild(loadMoreBtn);
+                    }
+                    
+                    if (tradesTab) {
+                        const loadMoreBtn = document.createElement('button');
+                        loadMoreBtn.className = 'load-more-button';
+                        loadMoreBtn.textContent = 'Load More';
+                        loadMoreBtn.onclick = () => loadMoreItems();
+                        tradesTab.appendChild(loadMoreBtn);
+                    }
+                } else if (hasMore && append) {
+                    // Update existing load more button
+                    const loadMoreBtns = document.querySelectorAll('.load-more-button');
+                    loadMoreBtns.forEach(btn => {
+                        let shouldDisable = false;
+                        if (itemType === 'news') {
+                            shouldDisable = (offset + 10) >= totalNews;
+                        } else if (itemType === 'trades') {
+                            shouldDisable = (offset + 10) >= totalTrades;
+                        } else {
+                            shouldDisable = (offset + 10) >= totalNews && (offset + 10) >= totalTrades;
+                        }
+                        if (shouldDisable) {
+                            btn.disabled = true;
+                            btn.textContent = 'No More Items';
+                        }
+                    });
+                }
+                
+                display.classList.remove('empty');
+                showingHistorical = offset > 0;
+                
+            } catch (error) {
+                console.error('Error fetching merged items:', error);
+                showError('Error loading news and trades: ' + error.message);
+                display.innerHTML = '<div class="summary-display empty">Error loading items</div>';
+                display.classList.add('empty');
+            }
+        }
+        
+        // Render a list of items (news or trades)
+        function renderItemsList(items, type, htmlOnly = false) {
+            if (items.length === 0) {
+                return htmlOnly ? '' : '<div class="summary-content"><p style="color: #999; font-style: italic;">No items available.</p></div>';
+            }
+            
+            let html = htmlOnly ? '' : '<div class="summary-content">';
+            
+            items.forEach((item, index) => {
+                const uniqueId = `${type}-item-${currentOffset + index}`;
+                const relativeTime = formatTimestamp(item.timestamp);
+                const absoluteTime = formatAbsoluteTimestamp(item.timestamp);
+                
+                // Process markdown content
+                let contentHtml = processMarkdownForItems(item.content || '', false);
+                
+                // Generate source tags HTML
+                let sourceTagsHtml = '';
+                if (item.source_tags && item.source_tags.length > 0) {
+                    sourceTagsHtml = '<div class="source-tags">';
+                    item.source_tags.forEach(tag => {
+                        sourceTagsHtml += `<a href="${tag.url}" target="_blank" rel="noopener noreferrer" class="source-tag">@${tag.handle}</a>`;
+                    });
+                    sourceTagsHtml += '</div>';
+                }
+                
+                // Process title (ensure tickers are bolded)
+                let titleHtml = processMarkdownForItems(item.title || '', false);
+                
+                html += `
+                    <div class="insight-card">
+                        <div class="insight-header" onclick="toggleInsight('${uniqueId}')">
+                            <div class="insight-title">${titleHtml}</div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="insight-timestamp" onclick="event.stopPropagation(); showAbsoluteTime('${uniqueId}', '${item.timestamp}')" title="Click for absolute time">${relativeTime}</span>
+                                <div class="insight-toggle">▼</div>
+                            </div>
+                        </div>
+                        <div class="insight-content" id="${uniqueId}">
+                            ${contentHtml || '<p style="color: #999; font-style: italic;">No additional details available.</p>'}
+                            ${sourceTagsHtml || ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += htmlOnly ? '' : '</div>';
+            return html;
+        }
+        
+        // Process markdown helper for items (reuse existing logic)
+        function processMarkdownForItems(text, useTickerBadges = false) {
+            if (!text) return '';
+            
+            // Ensure tickers are bolded
+            let processedText = text.replace(/\$([A-Z]{1,5})\b/g, (match, ticker) => {
+                const beforeMatch = text.substring(0, text.indexOf(match));
+                const afterMatch = text.substring(text.indexOf(match) + match.length);
+                const beforeBold = beforeMatch.lastIndexOf('**');
+                const afterBold = afterMatch.indexOf('**');
+                
+                if (beforeBold !== -1 && afterBold !== -1 && 
+                    beforeMatch.substring(beforeBold + 2).indexOf('**') === -1) {
+                    return match;
+                }
+                return `**$${ticker}**`;
+            });
+            
+            let html = marked.parse(processedText);
+            
+            if (useTickerBadges) {
+                html = html.replace(/<strong>\$([A-Z]{1,5})<\/strong>/g, (match, ticker) => {
+                    return `<span class="ticker-badge">$${ticker}</span>`;
+                });
+            }
+            
+            return html;
+        }
+        
+        // Load more items
+        async function loadMoreItems() {
+            const newOffset = currentOffset + 10;
+            await renderMergedItems(currentItemType, newOffset, true);
+        }
+        
+        // Show absolute time on timestamp click
+        function showAbsoluteTime(itemId, timestampStr) {
+            const timestampEl = event.target;
+            const absoluteTime = formatAbsoluteTimestamp(timestampStr);
+            
+            // Toggle between relative and absolute
+            if (timestampEl.textContent === absoluteTime) {
+                timestampEl.textContent = formatTimestamp(timestampStr);
+            } else {
+                timestampEl.textContent = absoluteTime;
+            }
+        }
+
+        function switchTab(tabName) {
+            console.log(`[DEBUG] Switching to tab: ${tabName}`);
+            // Remove active class from all tabs and contents
+            document.querySelectorAll('.summary-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            // Find and activate the correct tab button
+            const tabs = document.querySelectorAll('.summary-tab');
+            tabs.forEach(tab => {
+                const onclick = tab.getAttribute('onclick');
+                if (onclick && onclick.includes(`'${tabName}'`)) {
+                    tab.classList.add('active');
+                }
+            });
+            
+            // Activate the corresponding content
+            const contentElement = document.getElementById(`tab-${tabName}`);
+            if (contentElement) {
+                contentElement.classList.add('active');
+                console.log(`[DEBUG] Tab ${tabName} activated, content length:`, contentElement.innerHTML.length);
+            } else {
+                console.error(`[ERROR] Tab content element tab-${tabName} not found!`);
+            }
+        }
+
+        function toggleInsight(insightId) {
+            const content = document.getElementById(insightId);
+            if (!content) {
+                console.error(`[ERROR] Content element ${insightId} not found`);
+                return;
+            }
+            
+            // Find the toggle button in the header (parent of content's sibling)
+            const header = content.previousElementSibling;
+            const toggle = header ? header.querySelector('.insight-toggle') : null;
+            
+            console.log(`[DEBUG] Toggling insight ${insightId}, content length:`, content.innerHTML.length);
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                if (toggle) toggle.classList.remove('expanded');
+            } else {
+                content.classList.add('expanded');
+                if (toggle) toggle.classList.add('expanded');
+            }
+        }
+
+        async function refreshBriefUIDev() {
+            const display = document.getElementById('summaryDisplay');
+            const refreshEmoji = String.fromCodePoint(0x1F3A8);
+            display.innerHTML = '<div class="loading">' + refreshEmoji + ' Loading saved summary for UI development...</div>';
+            display.classList.remove('empty');
+            clearError();
+
+            try {
+                // Load merged items instead of parsing markdown
+                await renderMergedItems('all', 0, false);
+            } catch (error) {
+                showError('Error loading saved summary: ' + error.message);
+                display.innerHTML = '<div class="summary-display empty">Error loading summary</div>';
+                display.classList.add('empty');
+            }
+        }
+
+        function transformSectionsToCards(html) {
+            // Section configurations with icons (inspired by Zeno app)
+            const sections = [
+                {
+                    title: 'News',
+                    class: 'news-section',
+                    icon: '📰',
+                    label: 'Market News & Insights'
+                },
+                {
+                    title: 'Trades',
+                    class: 'trades-section',
+                    icon: '💰',
+                    label: 'Concrete Trade Actions'
+                }
+            ];
+
+            let transformedHtml = html;
+
+            sections.forEach(section => {
+                const regex = new RegExp(`(<h2>${section.title}<\/h2>)([\\s\\S]*?)(?=<h2>|$)`, 'gi');
+                transformedHtml = transformedHtml.replace(regex, (match, h2Tag, content) => {
+                    const cleanContent = content.trim();
+                    
+                    return `
+                    <div class="summary-section-card ${section.class}">
+                        <div class="section-header" data-section="${section.class}">
+                            <div class="section-icon">${section.icon}</div>
+                            <div class="section-title-group">
+                                <div class="section-label">${section.label}</div>
+                                <div class="section-title">${section.title}</div>
+                            </div>
+                            <div class="section-toggle">▼</div>
+                        </div>
+                        <div class="section-content">
+                            ${cleanContent}
+                        </div>
+                    </div>`;
+                });
+            });
+
+            return transformedHtml;
+        }
+
+        function initializeCollapsibleSections() {
+            const headers = document.querySelectorAll('.section-header');
+            headers.forEach(header => {
+                header.addEventListener('click', function() {
+                    const content = this.nextElementSibling;
+                    const toggle = this.querySelector('.section-toggle');
+                    
+                    if (content.classList.contains('collapsed')) {
+                        content.classList.remove('collapsed');
+                        toggle.classList.remove('collapsed');
+                    } else {
+                        content.classList.add('collapsed');
+                        toggle.classList.add('collapsed');
+                    }
+                });
+            });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        function clearError() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.innerHTML = '';
+        }
+
+        // Allow Enter key to add account
+        document.getElementById('accountInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addAccount();
+            }
+        });
+
+        // Set emojis using Unicode to avoid encoding issues
+        document.addEventListener('DOMContentLoaded', function() {
+            // Chart emoji 📈
+            const chartEmoji = String.fromCodePoint(0x1F4C8);
+            const headerEmoji = document.getElementById('headerEmoji');
+            if (headerEmoji) {
+                headerEmoji.textContent = chartEmoji;
+            }
+            
+            // Refresh emoji 🔄
+            const refreshEmoji = String.fromCodePoint(0x1F504);
+            const refreshBtnEmoji = document.getElementById('refreshEmoji');
+            if (refreshBtnEmoji) {
+                refreshBtnEmoji.textContent = refreshEmoji + ' ';
+            }
+        });
+
+        // Chat functionality
+        function handleChatKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChatMessage();
+            }
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const sendButton = document.getElementById('chatSendButton');
+            const messagesContainer = document.getElementById('chatMessages');
+            
+            const question = input.value.trim();
+            if (!question) {
+                return;
+            }
+            
+            // Disable input and button
+            input.disabled = true;
+            sendButton.disabled = true;
+            
+            // Add user message
+            const userMessage = document.createElement('div');
+            userMessage.className = 'chat-message user';
+            userMessage.innerHTML = `<div class="message-bubble">${escapeHtml(question)}</div>`;
+            messagesContainer.appendChild(userMessage);
+            
+            // Clear input
+            input.value = '';
+            
+            // Add loading indicator
+            const loadingMessage = document.createElement('div');
+            loadingMessage.className = 'chat-message assistant';
+            loadingMessage.id = 'loadingMessage';
+            loadingMessage.innerHTML = `
+                <div class="message-bubble">
+                    <div class="chat-loading">
+                        <span>Thinking</span>
+                        <div class="chat-loading-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            messagesContainer.appendChild(loadingMessage);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            try {
+                const response = await fetch(`${API_BASE}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        summary: window.currentSummary || ''
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get response from chat API');
+                }
+                
+                const data = await response.json();
+                
+                // Remove loading indicator
+                const loadingEl = document.getElementById('loadingMessage');
+                if (loadingEl) {
+                    loadingEl.remove();
+                }
+                
+                // Add assistant response
+                const assistantMessage = document.createElement('div');
+                assistantMessage.className = 'chat-message assistant';
+                assistantMessage.innerHTML = `<div class="message-bubble">${formatMarkdown(data.answer)}</div>`;
+                messagesContainer.appendChild(assistantMessage);
+                
+                // Scroll to bottom
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+            } catch (error) {
+                // Remove loading indicator
+                const loadingEl = document.getElementById('loadingMessage');
+                if (loadingEl) {
+                    loadingEl.remove();
+                }
+                
+                // Add error message
+                const errorMessage = document.createElement('div');
+                errorMessage.className = 'chat-message assistant';
+                errorMessage.innerHTML = `<div class="message-bubble" style="color: #d32f2f;">Sorry, I encountered an error. Please try again.</div>`;
+                messagesContainer.appendChild(errorMessage);
+                
+                console.error('Chat error:', error);
+            } finally {
+                // Re-enable input and button
+                input.disabled = false;
+                sendButton.disabled = false;
+                input.focus();
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatMarkdown(text) {
+            // Simple markdown formatting for chat messages
+            let html = escapeHtml(text);
+            // Convert markdown links
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            // Convert bold
+            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            // Convert italic
+            html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+            // Convert code blocks
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Convert line breaks
+            html = html.replace(/\n/g, '<br>');
+            return html;
+        }
+
+        // Auto-resize textarea
+        document.addEventListener('DOMContentLoaded', function() {
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) {
+                chatInput.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = (this.scrollHeight) + 'px';
+                });
+            }
+        });
+
+        // Load accounts on page load
+        loadAccounts();
+    </script>
+</body>
+</html>
+
