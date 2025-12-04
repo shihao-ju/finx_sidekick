@@ -1531,6 +1531,9 @@
             display.innerHTML = '<div class="loading">' + refreshEmoji + ' Fetching tweets and generating summary...</div>';
             display.classList.remove('empty');
             clearError();
+            
+            // Clear cache when manually refreshing to ensure fresh data
+            clearMergedItemsCache();
 
             try {
                 // Create abort controller for timeout (5 minutes)
@@ -1567,6 +1570,9 @@
             display.innerHTML = '<div class="loading">' + refreshEmoji + ' Using sample data to generate summary...</div>';
             display.classList.remove('empty');
             clearError();
+            
+            // Clear cache when manually refreshing to ensure fresh data
+            clearMergedItemsCache();
 
             try {
                 // Create abort controller for timeout (5 minutes)
@@ -2031,15 +2037,260 @@
             }
         }
         
+        // Cache management for merged items (only cache latest 10 news and 10 trades)
+        const CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+        const CACHE_KEY = 'mergedItems_latest';
+        const CACHE_HTML_KEY = 'mergedItems_html_latest';
+        
+        function saveMergedItemsCache(data, renderedHtml = null) {
+            try {
+                const cacheData = {
+                    data: data,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+                if (renderedHtml) {
+                    localStorage.setItem(CACHE_HTML_KEY, renderedHtml);
+                }
+                console.log('[DEBUG] Cached latest merged items');
+            } catch (error) {
+                console.error('[DEBUG] Failed to save cache:', error);
+            }
+        }
+        
+        function getMergedItemsCache() {
+            try {
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (!cached) {
+                    return null;
+                }
+                
+                const cacheData = JSON.parse(cached);
+                const age = Date.now() - cacheData.timestamp;
+                
+                if (age > CACHE_EXPIRY_MS) {
+                    // Cache expired, remove it
+                    localStorage.removeItem(CACHE_KEY);
+                    localStorage.removeItem(CACHE_HTML_KEY);
+                    return null;
+                }
+                
+                console.log(`[DEBUG] Using cached merged items (age: ${Math.round(age / 1000)}s)`);
+                return cacheData.data;
+            } catch (error) {
+                console.error('[DEBUG] Failed to read cache:', error);
+                return null;
+            }
+        }
+        
+        function getMergedItemsHtmlCache() {
+            try {
+                return localStorage.getItem(CACHE_HTML_KEY);
+            } catch (error) {
+                return null;
+            }
+        }
+        
+        function clearMergedItemsCache() {
+            try {
+                localStorage.removeItem(CACHE_KEY);
+                localStorage.removeItem(CACHE_HTML_KEY);
+                console.log('[DEBUG] Cleared cache');
+            } catch (error) {
+                console.error('[DEBUG] Failed to clear cache:', error);
+            }
+        }
+        
+        // Render merged items content (extracted for reuse with cache)
+        async function renderMergedItemsContent(data, itemType, offset, append, display, skipLikedStatus = false) {
+            // Backend returns {news: [...], trades: [...], total_news: ..., total_trades: ...}
+            const newsItems = data.news || [];
+            const tradesItems = data.trades || [];
+            const totalNews = data.total_news || 0;
+            const totalTrades = data.total_trades || 0;
+            
+            // If no items and this is initial load, show empty state
+            if (!append && newsItems.length === 0 && tradesItems.length === 0) {
+                display.innerHTML = '<div class="summary-display empty">No summaries available yet. Use the admin page to trigger a refresh.</div>';
+                display.classList.add('empty');
+                return;
+            }
+            
+            // Calculate total items based on item_type
+            if (itemType === 'news') {
+                totalItems = totalNews;
+            } else if (itemType === 'trades') {
+                totalItems = totalTrades;
+            } else {
+                totalItems = totalNews + totalTrades;
+            }
+            
+            currentOffset = offset;
+            currentItemType = itemType;
+            
+            // Render items
+            if (!append) {
+                // Initial render - create tab structure
+                let tabsHtml = '<div class="summary-tabs">';
+                tabsHtml += '<button class="summary-tab active" onclick="switchTab(\'news\'); return false;">📰 News</button>';
+                tabsHtml += '<button class="summary-tab" onclick="switchTab(\'trades\'); return false;">💰 Trades</button>';
+                tabsHtml += '<button class="summary-tab" onclick="switchTab(\'liked\'); return false;">❤️ Liked</button>';
+                tabsHtml += '<button class="summary-tab" onclick="switchTab(\'thoughts\'); return false;">💭 Thoughts</button>';
+                tabsHtml += '</div>';
+                
+                let contentHtml = '<div class="tab-content active" id="tab-news">';
+                // Render immediately without waiting for liked status if skipLikedStatus is true
+                contentHtml += await renderItemsList(newsItems, 'news', false, skipLikedStatus);
+                contentHtml += '</div>';
+                
+                contentHtml += '<div class="tab-content" id="tab-trades">';
+                contentHtml += await renderItemsList(tradesItems, 'trades', false, skipLikedStatus);
+                contentHtml += '</div>';
+                
+                contentHtml += '<div class="tab-content" id="tab-liked">';
+                contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading liked news...</p></div>';
+                contentHtml += '</div>';
+                
+                contentHtml += '<div class="tab-content" id="tab-thoughts">';
+                contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading thoughts...</p></div>';
+                contentHtml += '</div>';
+                
+                const fullHtml = tabsHtml + contentHtml;
+                display.innerHTML = fullHtml;
+                
+                // Save rendered HTML to cache for instant display on next page load (only for main view)
+                if (itemType === 'all' && offset === 0 && !append) {
+                    try {
+                        localStorage.setItem(CACHE_HTML_KEY, fullHtml);
+                        console.log('[DEBUG] Cached rendered HTML for instant display');
+                    } catch (error) {
+                        console.error('[DEBUG] Failed to cache HTML:', error);
+                    }
+                }
+                
+                // Load liked news and thoughts in background
+                loadLikedNews().catch(err => console.error('Error loading liked news:', err));
+                loadThoughts().catch(err => console.error('Error loading thoughts:', err));
+                
+                // If we skipped liked status, load it now in background and update UI
+                if (skipLikedStatus) {
+                    updateLikedStatusInBackground(newsItems.concat(tradesItems), display).catch(err => console.error('Error updating liked status:', err));
+                }
+            } else {
+                // Append to existing lists
+                const newsTab = document.getElementById('tab-news');
+                const tradesTab = document.getElementById('tab-trades');
+                
+                if (newsTab && newsItems.length > 0) {
+                    const newsList = newsTab.querySelector('.summary-content');
+                    if (newsList) {
+                        newsList.innerHTML += await renderItemsList(newsItems, 'news', true, skipLikedStatus);
+                    }
+                }
+                
+                if (tradesTab && tradesItems.length > 0) {
+                    const tradesList = tradesTab.querySelector('.summary-content');
+                    if (tradesList) {
+                        tradesList.innerHTML += await renderItemsList(tradesItems, 'trades', true, skipLikedStatus);
+                    }
+                }
+            }
+            
+            // Add "Load More" button if there are more items
+            let hasMore = false;
+            if (itemType === 'news') {
+                hasMore = (offset + 10) < totalNews;
+            } else if (itemType === 'trades') {
+                hasMore = (offset + 10) < totalTrades;
+            } else {
+                hasMore = (offset + 10) < totalNews || (offset + 10) < totalTrades;
+            }
+            
+            if (hasMore && !append) {
+                const newsTab = document.getElementById('tab-news');
+                const tradesTab = document.getElementById('tab-trades');
+                
+                if (newsTab) {
+                    const loadMoreBtn = document.createElement('button');
+                    loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.textContent = 'Load More';
+                    loadMoreBtn.onclick = () => loadMoreItems();
+                    newsTab.appendChild(loadMoreBtn);
+                }
+                
+                if (tradesTab) {
+                    const loadMoreBtn = document.createElement('button');
+                    loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.textContent = 'Load More';
+                    loadMoreBtn.onclick = () => loadMoreItems();
+                    tradesTab.appendChild(loadMoreBtn);
+                }
+            } else if (hasMore && append) {
+                const loadMoreBtns = document.querySelectorAll('.load-more-button');
+                loadMoreBtns.forEach(btn => {
+                    let shouldDisable = false;
+                    if (itemType === 'news') {
+                        shouldDisable = (offset + 10) >= totalNews;
+                    } else if (itemType === 'trades') {
+                        shouldDisable = (offset + 10) >= totalTrades;
+                    } else {
+                        shouldDisable = (offset + 10) >= totalNews && (offset + 10) >= totalTrades;
+                    }
+                    if (shouldDisable) {
+                        btn.disabled = true;
+                        btn.textContent = 'No More Items';
+                    }
+                });
+            }
+            
+            display.classList.remove('empty');
+            showingHistorical = offset > 0;
+        }
+        
         // Fetch and render merged items
         async function renderMergedItems(itemType = 'all', offset = 0, append = false) {
             const display = document.getElementById('summaryDisplay');
             
-            if (!append) {
+            // Check cache first (only for main view: itemType='all', offset=0, not appending)
+            let cachedData = null;
+            let cachedHtml = null;
+            if (!append && itemType === 'all' && offset === 0) {
+                cachedData = getMergedItemsCache();
+                cachedHtml = getMergedItemsHtmlCache();
+                if (cachedHtml && cachedData) {
+                    // Render cached HTML immediately for INSTANT display (no processing needed)
+                    console.log('[DEBUG] Rendering cached HTML immediately');
+                    display.innerHTML = cachedHtml;
+                    display.classList.remove('empty');
+                    
+                    // Set state variables for consistency
+                    const totalNews = cachedData.total_news || 0;
+                    const totalTrades = cachedData.total_trades || 0;
+                    totalItems = totalNews + totalTrades;
+                    currentOffset = 0;
+                    currentItemType = 'all';
+                    
+                    // Load liked news and thoughts in background
+                    loadLikedNews().catch(err => console.error('Error loading liked news:', err));
+                    loadThoughts().catch(err => console.error('Error loading thoughts:', err));
+                    // Update liked status in background
+                    updateLikedStatusInBackground(cachedData.news.concat(cachedData.trades || []), display).catch(err => console.error('Error updating liked status:', err));
+                } else if (cachedData) {
+                    // Have data but no HTML cache, render it (still fast with skipLikedStatus)
+                    console.log('[DEBUG] Rendering cached data immediately');
+                    await renderMergedItemsContent(cachedData, itemType, offset, append, display, true);
+                } else {
+                    // No cache, show loading message
+                    display.innerHTML = '<div class="loading">📊 Loading news and trades...</div>';
+                    display.classList.remove('empty');
+                }
+            } else if (!append) {
+                // Not main view, show loading message
                 display.innerHTML = '<div class="loading">📊 Loading news and trades...</div>';
                 display.classList.remove('empty');
             }
             
+            // Always fetch fresh data in background
             try {
                 const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}`);
                 if (!response.ok) {
@@ -2057,141 +2308,26 @@
                 const data = await response.json();
                 console.log('[DEBUG] Merged items response:', data);
                 
-                // Backend returns {news: [...], trades: [...], total_news: ..., total_trades: ...}
-                const newsItems = data.news || [];
-                const tradesItems = data.trades || [];
-                const totalNews = data.total_news || 0;
-                const totalTrades = data.total_trades || 0;
-                
-                // If no items and this is initial load, show empty state
-                if (!append && newsItems.length === 0 && tradesItems.length === 0) {
-                    display.innerHTML = '<div class="summary-display empty">No summaries available yet. Use the admin page to trigger a refresh.</div>';
-                    display.classList.add('empty');
-                    return;
+                // Save to cache (only for main view) - HTML will be saved by renderMergedItemsContent
+                if (itemType === 'all' && offset === 0) {
+                    saveMergedItemsCache(data);
                 }
                 
-                // Calculate total items based on item_type
-                if (itemType === 'news') {
-                    totalItems = totalNews;
-                } else if (itemType === 'trades') {
-                    totalItems = totalTrades;
+                // Only update display if we didn't already show cached data, or if data is different
+                if (!cachedData || JSON.stringify(cachedData) !== JSON.stringify(data)) {
+                    await renderMergedItemsContent(data, itemType, offset, append, display);
                 } else {
-                    totalItems = totalNews + totalTrades;
+                    console.log('[DEBUG] Fresh data matches cache, no update needed');
                 }
-                
-                currentOffset = offset;
-                currentItemType = itemType;
-                
-                // Render items
-                if (!append) {
-                    // Initial render - create tab structure
-                    let tabsHtml = '<div class="summary-tabs">';
-                    tabsHtml += '<button class="summary-tab active" onclick="switchTab(\'news\'); return false;">📰 News</button>';
-                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'trades\'); return false;">💰 Trades</button>';
-                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'liked\'); return false;">❤️ Liked</button>';
-                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'thoughts\'); return false;">💭 Thoughts</button>';
-                    tabsHtml += '</div>';
-                    
-                    let contentHtml = '<div class="tab-content active" id="tab-news">';
-                    contentHtml += await renderItemsList(newsItems, 'news');
-                    contentHtml += '</div>';
-                    
-                    contentHtml += '<div class="tab-content" id="tab-trades">';
-                    contentHtml += await renderItemsList(tradesItems, 'trades');
-                    contentHtml += '</div>';
-                    
-                    contentHtml += '<div class="tab-content" id="tab-liked">';
-                    contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading liked news...</p></div>';
-                    contentHtml += '</div>';
-                    
-                    contentHtml += '<div class="tab-content" id="tab-thoughts">';
-                    contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading thoughts...</p></div>';
-                    contentHtml += '</div>';
-                    
-                    display.innerHTML = tabsHtml + contentHtml;
-                    
-                    // Load liked news and thoughts in background
-                    loadLikedNews().catch(err => console.error('Error loading liked news:', err));
-                    loadThoughts().catch(err => console.error('Error loading thoughts:', err));
-                } else {
-                    // Append to existing lists
-                    const newsTab = document.getElementById('tab-news');
-                    const tradesTab = document.getElementById('tab-trades');
-                    
-                    if (newsTab && newsItems.length > 0) {
-                        const newsList = newsTab.querySelector('.summary-content');
-                        if (newsList) {
-                            newsList.innerHTML += await renderItemsList(newsItems, 'news', true);
-                        }
-                    }
-                    
-                    if (tradesTab && tradesItems.length > 0) {
-                        const tradesList = tradesTab.querySelector('.summary-content');
-                        if (tradesList) {
-                            tradesList.innerHTML += await renderItemsList(tradesItems, 'trades', true);
-                        }
-                    }
-                }
-                
-                // Add "Load More" button if there are more items
-                // For "all" type, check if there are more news OR trades
-                let hasMore = false;
-                if (itemType === 'news') {
-                    hasMore = (offset + 10) < totalNews;
-                } else if (itemType === 'trades') {
-                    hasMore = (offset + 10) < totalTrades;
-                } else {
-                    // For "all", check if there are more items in either category
-                    hasMore = (offset + 10) < totalNews || (offset + 10) < totalTrades;
-                }
-                
-                if (hasMore && !append) {
-                    // Add load more button to both tabs
-                    const newsTab = document.getElementById('tab-news');
-                    const tradesTab = document.getElementById('tab-trades');
-                    
-                    if (newsTab) {
-                        const loadMoreBtn = document.createElement('button');
-                        loadMoreBtn.className = 'load-more-button';
-                        loadMoreBtn.textContent = 'Load More';
-                        loadMoreBtn.onclick = () => loadMoreItems();
-                        newsTab.appendChild(loadMoreBtn);
-                    }
-                    
-                    if (tradesTab) {
-                        const loadMoreBtn = document.createElement('button');
-                        loadMoreBtn.className = 'load-more-button';
-                        loadMoreBtn.textContent = 'Load More';
-                        loadMoreBtn.onclick = () => loadMoreItems();
-                        tradesTab.appendChild(loadMoreBtn);
-                    }
-                } else if (hasMore && append) {
-                    // Update existing load more button
-                    const loadMoreBtns = document.querySelectorAll('.load-more-button');
-                    loadMoreBtns.forEach(btn => {
-                        let shouldDisable = false;
-                        if (itemType === 'news') {
-                            shouldDisable = (offset + 10) >= totalNews;
-                        } else if (itemType === 'trades') {
-                            shouldDisable = (offset + 10) >= totalTrades;
-                        } else {
-                            shouldDisable = (offset + 10) >= totalNews && (offset + 10) >= totalTrades;
-                        }
-                        if (shouldDisable) {
-                            btn.disabled = true;
-                            btn.textContent = 'No More Items';
-                        }
-                    });
-                }
-                
-                display.classList.remove('empty');
-                showingHistorical = offset > 0;
                 
             } catch (error) {
                 console.error('Error fetching merged items:', error);
-                showError('Error loading news and trades: ' + error.message);
-                display.innerHTML = '<div class="summary-display empty">Error loading items</div>';
-                display.classList.add('empty');
+                // If we have cached data and network fails, keep showing cache
+                if (!cachedData) {
+                    showError('Error loading news and trades: ' + error.message);
+                    display.innerHTML = '<div class="summary-display empty">Error loading items</div>';
+                    display.classList.add('empty');
+                }
             }
         }
         
@@ -2215,21 +2351,76 @@
         // Store liked status and thoughts in memory for quick access
         let likedNewsHashes = new Set();
         let newsThoughts = new Map();
-
-        // Render a list of items (news or trades)
-        async function renderItemsList(items, type, htmlOnly = false) {
-            if (items.length === 0) {
-                return htmlOnly ? '' : '<div class="summary-content"><p style="color: #999; font-style: italic;">No items available.</p></div>';
-            }
+        
+        // Update liked status in background after rendering cached data
+        async function updateLikedStatusInBackground(items, display) {
+            if (!items || items.length === 0) return;
             
-            // Generate hashes for all items and check liked status
+            // Generate hashes for all items
             const hashPromises = items.map(item => 
                 generateNewsHash(item.title || '', item.content || '', item.timestamp || '')
             );
             const hashes = await Promise.all(hashPromises);
             
             // Check liked status for all items
-            if (hashes.length > 0) {
+            try {
+                const response = await fetch(`${API_BASE}/api/news/liked-status?news_hashes=${hashes.join(',')}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    likedNewsHashes = new Set(data.liked_hashes || []);
+                    
+                    // Update UI with liked status
+                    hashes.forEach((hash, index) => {
+                        const isLiked = likedNewsHashes.has(hash);
+                        const likeBtn = document.querySelector(`button[data-news-hash="${hash}"]`);
+                        if (likeBtn) {
+                            if (isLiked) {
+                                likeBtn.classList.add('liked');
+                            } else {
+                                likeBtn.classList.remove('liked');
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error checking liked status in background:', error);
+            }
+            
+            // Load thoughts for all items
+            for (let i = 0; i < hashes.length; i++) {
+                try {
+                    const thoughtResponse = await fetch(`${API_BASE}/api/news/thought/${hashes[i]}`);
+                    if (thoughtResponse.ok) {
+                        const thoughtData = await thoughtResponse.json();
+                        if (thoughtData.thought) {
+                            newsThoughts.set(hashes[i], thoughtData.thought);
+                            // Update UI with thought indicator
+                            const thoughtBtn = document.querySelector(`button[data-news-hash="${hashes[i]}"].thought-btn`);
+                            if (thoughtBtn) {
+                                thoughtBtn.classList.add('has-thought');
+                            }
+                        }
+                    }
+                } catch (error) {
+                    // Ignore errors for individual thoughts
+                }
+            }
+        }
+
+        // Render a list of items (news or trades)
+        async function renderItemsList(items, type, htmlOnly = false, skipLikedStatus = false) {
+            if (items.length === 0) {
+                return htmlOnly ? '' : '<div class="summary-content"><p style="color: #999; font-style: italic;">No items available.</p></div>';
+            }
+            
+            // Generate hashes for all items
+            const hashPromises = items.map(item => 
+                generateNewsHash(item.title || '', item.content || '', item.timestamp || '')
+            );
+            const hashes = await Promise.all(hashPromises);
+            
+            // Check liked status for all items (skip if rendering from cache for instant display)
+            if (!skipLikedStatus && hashes.length > 0) {
                 try {
                     const response = await fetch(`${API_BASE}/api/news/liked-status?news_hashes=${hashes.join(',')}`);
                     if (response.ok) {
@@ -2264,8 +2455,8 @@
                 const relativeTime = formatTimestamp(item.timestamp);
                 const absoluteTime = formatAbsoluteTimestamp(item.timestamp);
                 const newsHash = hashes[index];
-                const isLiked = likedNewsHashes.has(newsHash);
-                const hasThought = newsThoughts.has(newsHash);
+                const isLiked = skipLikedStatus ? false : likedNewsHashes.has(newsHash);
+                const hasThought = skipLikedStatus ? false : newsThoughts.has(newsHash);
                 
                 // Process markdown content
                 let contentHtml = processMarkdownForItems(item.content || '', false);
@@ -3175,6 +3366,37 @@
                 console.log('No existing summaries to load:', error.message);
                 // Keep the empty state message if no summaries exist
             }
+            
+            // Check for manual trigger refresh signal (from admin page)
+            function checkTriggerRefresh() {
+                const triggerTime = localStorage.getItem('trigger_refresh');
+                if (triggerTime) {
+                    const age = Date.now() - parseInt(triggerTime);
+                    if (age < 60000) { // Within last minute
+                        console.log('[DEBUG] Manual trigger detected, refreshing immediately...');
+                        localStorage.removeItem('trigger_refresh');
+                        renderMergedItems('all', 0, false).catch(err => 
+                            console.error('[DEBUG] Trigger refresh failed:', err)
+                        );
+                    } else {
+                        localStorage.removeItem('trigger_refresh'); // Clean up old signal
+                    }
+                }
+            }
+            
+            // Check immediately and then every 5 seconds for trigger signal
+            checkTriggerRefresh();
+            setInterval(checkTriggerRefresh, 5000);
+            
+            // Auto-refresh summaries every 2 minutes to pick up scheduler updates
+            setInterval(async () => {
+                try {
+                    await renderMergedItems('all', 0, false);
+                    console.log('[DEBUG] Auto-refreshed summaries');
+                } catch (error) {
+                    console.log('[DEBUG] Auto-refresh failed (non-critical):', error.message);
+                }
+            }, 120000); // 2 minutes
         }
         
         if (document.readyState === 'loading') {

@@ -96,6 +96,36 @@ def init_database():
         )
     """)
     
+    # Create parsed_news_items table (pre-computed parsed items for fast /merged-items endpoint)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS parsed_news_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            summary_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            tweet_ids TEXT NOT NULL,
+            source_tags TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (summary_id) REFERENCES summaries(id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Create parsed_trades_items table (pre-computed parsed items for fast /merged-items endpoint)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS parsed_trades_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            summary_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            tweet_ids TEXT NOT NULL,
+            source_tags TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (summary_id) REFERENCES summaries(id) ON DELETE CASCADE
+        )
+    """)
+    
     # Migrate existing news_thoughts table if it doesn't have new columns
     try:
         cursor.execute("ALTER TABLE news_thoughts ADD COLUMN title TEXT")
@@ -138,6 +168,18 @@ def init_database():
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_news_thoughts_hash ON news_thoughts(news_hash)
     """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_parsed_news_summary_id ON parsed_news_items(summary_id)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_parsed_news_timestamp ON parsed_news_items(timestamp)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_parsed_trades_summary_id ON parsed_trades_items(summary_id)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_parsed_trades_timestamp ON parsed_trades_items(timestamp)
+    """)
     
     conn.commit()
     conn.close()
@@ -145,7 +187,7 @@ def init_database():
 
 def save_summary(summary: str, tweet_ids: List[str], generation_timestamp: Optional[str] = None) -> int:
     """
-    Save a summary to the database.
+    Save a summary to the database and pre-compute parsed items.
     If a summary with the same tweet_ids already exists, updates it instead of creating a duplicate.
     
     Args:
@@ -197,6 +239,36 @@ def save_summary(summary: str, tweet_ids: List[str], generation_timestamp: Optio
     
     conn.commit()
     conn.close()
+    
+    # Pre-compute and save parsed items for fast /merged-items endpoint
+    try:
+        from summary_parser import parse_news_items, parse_trades_items
+        
+        # Load tweets data for timestamp lookup (optional, may not exist)
+        tweets_data = None
+        if os.path.exists("test_tweets_data.json"):
+            try:
+                with open("test_tweets_data.json", "r", encoding="utf-8") as f:
+                    tweets_data = json.load(f)
+            except Exception:
+                pass
+        
+        # Parse news items
+        news_items = parse_news_items(summary, tweet_ids, generation_timestamp, tweets_data)
+        if news_items:
+            save_parsed_news_items(summary_id, news_items)
+            print(f"[INFO] Pre-computed and saved {len(news_items)} news items for summary {summary_id}")
+        
+        # Parse trades items
+        trades_items = parse_trades_items(summary, tweet_ids, generation_timestamp, tweets_data)
+        if trades_items:
+            save_parsed_trades_items(summary_id, trades_items)
+            print(f"[INFO] Pre-computed and saved {len(trades_items)} trades items for summary {summary_id}")
+    except Exception as e:
+        # Don't fail summary save if parsing fails
+        print(f"[WARNING] Failed to pre-compute parsed items for summary {summary_id}: {e}")
+        import traceback
+        traceback.print_exc()
     
     return summary_id
 
@@ -273,6 +345,159 @@ def get_summary_count() -> int:
     conn.close()
     
     return count
+
+
+# ============================================================================
+# Parsed Items Functions (Pre-computed for fast /merged-items endpoint)
+# ============================================================================
+
+def save_parsed_news_items(summary_id: int, news_items: List[Dict]) -> None:
+    """
+    Save parsed news items for a summary.
+    
+    Args:
+        summary_id: ID of the summary these items belong to
+        news_items: List of news item dictionaries with title, content, timestamp, tweet_ids, source_tags
+    """
+    if not news_items:
+        return
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Delete existing parsed items for this summary (in case of update)
+    cursor.execute("DELETE FROM parsed_news_items WHERE summary_id = ?", (summary_id,))
+    
+    # Insert new parsed items
+    for item in news_items:
+        cursor.execute("""
+            INSERT INTO parsed_news_items (summary_id, title, content, timestamp, tweet_ids, source_tags)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            summary_id,
+            item.get("title", ""),
+            item.get("content", ""),
+            item.get("timestamp", ""),
+            json.dumps(item.get("tweet_ids", [])),
+            json.dumps(item.get("source_tags", []))
+        ))
+    
+    conn.commit()
+    conn.close()
+
+
+def save_parsed_trades_items(summary_id: int, trades_items: List[Dict]) -> None:
+    """
+    Save parsed trades items for a summary.
+    
+    Args:
+        summary_id: ID of the summary these items belong to
+        trades_items: List of trades item dictionaries with title, content, timestamp, tweet_ids, source_tags
+    """
+    if not trades_items:
+        return
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Delete existing parsed items for this summary (in case of update)
+    cursor.execute("DELETE FROM parsed_trades_items WHERE summary_id = ?", (summary_id,))
+    
+    # Insert new parsed items
+    for item in trades_items:
+        cursor.execute("""
+            INSERT INTO parsed_trades_items (summary_id, title, content, timestamp, tweet_ids, source_tags)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            summary_id,
+            item.get("title", ""),
+            item.get("content", ""),
+            item.get("timestamp", ""),
+            json.dumps(item.get("tweet_ids", [])),
+            json.dumps(item.get("source_tags", []))
+        ))
+    
+    conn.commit()
+    conn.close()
+
+
+def get_all_parsed_news_items() -> List[Dict]:
+    """
+    Get all parsed news items from database, ordered by timestamp (newest first).
+    
+    Returns:
+        List of news item dictionaries
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT title, content, timestamp, tweet_ids, source_tags
+        FROM parsed_news_items
+        ORDER BY timestamp DESC
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "title": row[0],
+            "content": row[1],
+            "timestamp": row[2],
+            "tweet_ids": json.loads(row[3]),
+            "source_tags": json.loads(row[4])
+        }
+        for row in rows
+    ]
+
+
+def get_all_parsed_trades_items() -> List[Dict]:
+    """
+    Get all parsed trades items from database, ordered by timestamp (newest first).
+    
+    Returns:
+        List of trades item dictionaries
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT title, content, timestamp, tweet_ids, source_tags
+        FROM parsed_trades_items
+        ORDER BY timestamp DESC
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "title": row[0],
+            "content": row[1],
+            "timestamp": row[2],
+            "tweet_ids": json.loads(row[3]),
+            "source_tags": json.loads(row[4])
+        }
+        for row in rows
+    ]
+
+
+def delete_parsed_items_for_summary(summary_id: int) -> None:
+    """
+    Delete parsed items for a summary (called when summary is deleted).
+    
+    Args:
+        summary_id: ID of the summary
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("DELETE FROM parsed_news_items WHERE summary_id = ?", (summary_id,))
+    cursor.execute("DELETE FROM parsed_trades_items WHERE summary_id = ?", (summary_id,))
+    
+    conn.commit()
+    conn.close()
 
 
 # ============================================================================

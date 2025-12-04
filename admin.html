@@ -622,6 +622,10 @@
                 });
                 const data = await response.json();
                 showSuccess(data.message || 'Manual refresh triggered');
+                
+                // Signal main page to refresh immediately
+                localStorage.setItem('trigger_refresh', Date.now().toString());
+                
                 setTimeout(() => refreshAll(), 2000); // Refresh logs after 2 seconds
             } catch (error) {
                 showError(`Failed to trigger scheduler: ${error.message}`);

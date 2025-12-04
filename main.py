@@ -38,7 +38,9 @@ from database import (
     get_summaries,
     get_summary_count,
     migrate_from_state_json,
-    update_account_tracking
+    update_account_tracking,
+    get_all_parsed_news_items,
+    get_all_parsed_trades_items
 )
 from tweet_utils import (
     extract_tweet_ids_from_summary,
@@ -1675,7 +1677,8 @@ async def get_summaries_endpoint(limit: int = 10, offset: int = 0):
 @app.get("/merged-items", response_model=MergedItemsResponse)
 async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "all"):
     """
-    Get merged news and trades items from all summaries, sorted chronologically.
+    Get merged news and trades items from pre-computed parsed items, sorted chronologically.
+    This endpoint is fast because it queries pre-parsed items instead of parsing summaries on-the-fly.
     
     Args:
         limit: Number of items to return per type (default: 10)
@@ -1685,40 +1688,9 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
     Returns:
         MergedItemsResponse with chronologically sorted news and trades
     """
-    import json
-    
-    # Load tweets data for timestamp lookup
-    tweets_data = None
-    if os.path.exists("test_tweets_data.json"):
-        try:
-            with open("test_tweets_data.json", "r", encoding="utf-8") as f:
-                tweets_data = json.load(f)
-        except Exception:
-            pass
-    
-    # Get all summaries from database
-    all_summaries = get_summaries(limit=1000, offset=0)  # Get all summaries
-    
-    # Parse all news and trades items
-    all_news = []
-    all_trades = []
-    
-    for summary in all_summaries:
-        news_items = parse_news_items(
-            summary["summary"],
-            summary["tweet_ids"],
-            summary["timestamp"],
-            tweets_data
-        )
-        all_news.extend(news_items)
-        
-        trades_items = parse_trades_items(
-            summary["summary"],
-            summary["tweet_ids"],
-            summary["timestamp"],
-            tweets_data
-        )
-        all_trades.extend(trades_items)
+    # Get pre-computed parsed items directly from database (fast!)
+    all_news = get_all_parsed_news_items()
+    all_trades = get_all_parsed_trades_items()
     
     # Deduplicate news and trades items
     # Strategy: Use fuzzy matching on titles + tweet ID overlap to detect duplicates
