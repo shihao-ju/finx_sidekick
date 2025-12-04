@@ -873,8 +873,8 @@
                 <div class="summary-display empty" id="summaryDisplay">
                     Click "Refresh Market Intel" to generate your financial summary
                 </div>
-            </div>
-
+                </div>
+                
             <!-- Chatbox Sidebar -->
             <div class="chat-sidebar">
                 <div class="chat-container" id="chatContainer">
@@ -1163,8 +1163,8 @@
                 if (useTickerBadges) {
                     // Replace <strong>$TICKER</strong> with ticker badge
                     html = html.replace(/<strong>\$([A-Z]{1,5})<\/strong>/g, (match, ticker) => {
-                        return `<span class="ticker-badge">$${ticker}</span>`;
-                    });
+                return `<span class="ticker-badge">$${ticker}</span>`;
+            });
                 }
                 
                 return html;
