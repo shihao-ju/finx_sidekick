@@ -1,0 +1,11 @@
+{
+  "repo_url": "https://github.com/your-username/your-repo-name",
+  "service_name": "twitracker",
+  "branch": "main",
+  "port": 8000,
+  "env_vars": {
+    "TWITTER_API_KEY": "your-twitter-api-key-here",
+    "ADMIN_TOKEN": "your-admin-token-here"
+  }
+}
+

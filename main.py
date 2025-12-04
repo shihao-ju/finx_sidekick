@@ -135,11 +135,12 @@ app.add_middleware(
 )
 
 # Load AI Builder API key with retry logic
-SECOND_MIND_API_KEY = os.getenv("SECOND_MIND_API_KEY")
+# Check SECOND_MIND_API_KEY first (for backward compatibility), then AI_BUILDER_TOKEN (for deployment)
+SECOND_MIND_API_KEY = os.getenv("SECOND_MIND_API_KEY") or os.getenv("AI_BUILDER_TOKEN")
 if not SECOND_MIND_API_KEY:
     # Retry loading .env file
     load_dotenv(dotenv_path=".env", override=True)
-    SECOND_MIND_API_KEY = os.getenv("SECOND_MIND_API_KEY")
+    SECOND_MIND_API_KEY = os.getenv("SECOND_MIND_API_KEY") or os.getenv("AI_BUILDER_TOKEN")
 
 # Initialize OpenAI client for AI Builder API
 if not SECOND_MIND_API_KEY:
@@ -2198,11 +2199,13 @@ async def view_summaries_page():
 
 if __name__ == "__main__":
     import uvicorn
+    # Read PORT from environment variable (required for deployment platforms like Koyeb)
+    port = int(os.getenv("PORT", "8000"))
     # Increase timeout for long-running AI operations
     uvicorn.run(
         app, 
         host="0.0.0.0", 
-        port=8000,
+        port=port,
         timeout_keep_alive=300,  # 5 minutes
         timeout_graceful_shutdown=300
     )
