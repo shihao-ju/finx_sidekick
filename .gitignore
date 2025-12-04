@@ -1,12 +1,46 @@
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Runtime data files
 state.json
+summaries.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+
+# Virtual environments
 venv/
 env/
 ENV/
 .venv
+
+# Test files and scripts (keep locally, don't track in git)
+test_*.py
+*_test.py
+investigate_*.py
+verify_*.py
+view_*.py
+sync_*.py
+test_*.json
+
+# Documentation (keep README.md)
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Unused HTML files
+summary_correct.html
+summary_with_placeholders.html
+tweets_viewer.html
 
