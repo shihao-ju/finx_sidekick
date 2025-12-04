@@ -338,19 +338,37 @@
         // Authentication state - get from URL or prompt
         let authToken = getTokenFromURL();
         
-        // If no token in URL, prompt for it
-        if (!authToken) {
-            const token = prompt('Admin page requires authentication. Please enter admin token:');
-            if (token && token.trim()) {
-                authToken = token.trim();
-                // Update URL to include token
-                const url = new URL(window.location);
-                url.searchParams.set('token', authToken);
-                window.history.replaceState({}, '', url);
-            } else {
-                window.location.href = '/';
+        // Wait for DOM to be ready before checking authentication
+        document.addEventListener('DOMContentLoaded', function() {
+            // If no token in URL, prompt for it
+            if (!authToken) {
+                const token = prompt('Admin page requires authentication. Please enter admin token:');
+                if (token && token.trim()) {
+                    authToken = token.trim();
+                    // Update URL to include token
+                    const url = new URL(window.location);
+                    url.searchParams.set('token', authToken);
+                    window.history.replaceState({}, '', url);
+                } else {
+                    // Show error message before redirecting
+                    alert('Authentication required. Redirecting to main page.');
+                    window.location.href = '/';
+                    return;
+                }
             }
-        }
+            
+            // Only load status/logs if we have a token
+            if (authToken) {
+                loadStatus();
+                loadLogs();
+                
+                // Auto-refresh every 10 seconds
+                setInterval(() => {
+                    loadStatus();
+                    loadLogs();
+                }, 10000);
+            }
+        });
         
         // Helper to add token to query string
         function addTokenToURL(url) {
@@ -723,16 +741,6 @@
                 successDiv.style.display = 'none';
             }, 3000);
         }
-        
-        // Load initial data
-        loadStatus();
-        loadLogs();
-        
-        // Auto-refresh every 10 seconds
-        setInterval(() => {
-            loadStatus();
-            loadLogs();
-        }, 10000);
     </script>
 </body>
 </html>
