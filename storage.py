@@ -15,41 +15,6 @@ from database import (
     get_latest_summary
 )
 
-# Keep these for backward compatibility during migration
-import json
-import os
-
-STATE_FILE = "state.json"
-
-
-def load_state() -> Dict:
-    """
-    Load state from JSON file (for backward compatibility).
-    This function is kept for migration purposes but should not be used for new code.
-    """
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    
-    # Default state structure
-    return {
-        "monitored_accounts": [],
-        "session_context": {}
-    }
-
-
-def save_state(state: Dict) -> None:
-    """
-    Save state to JSON file (for backward compatibility).
-    This function is kept for migration purposes but should not be used for new code.
-    """
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
 def get_monitored_accounts() -> List[Dict]:
     """Get list of monitored Twitter accounts with handle and username from database."""
     accounts = get_all_accounts()

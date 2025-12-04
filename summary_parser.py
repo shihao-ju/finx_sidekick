@@ -3,7 +3,7 @@ Parse summaries to extract individual news and trades items with timestamps.
 """
 import re
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from tweet_utils import extract_tweet_ids_from_summary, get_tweet_timestamp, get_latest_tweet_timestamp, format_relative_time
 
 
@@ -171,17 +171,38 @@ def parse_news_items(summary_text: str, tweet_ids: List[str], generation_timesta
                     content_text = re.sub(r'\n\s*\n', '\n\n', content_text)
                     content_text = content_text.strip()
                     
-                    # Get latest timestamp from tweet IDs
+                    # Get earliest timestamp from tweet IDs (represents when the news actually happened)
+                    # Use earliest instead of latest to show when the news first appeared
                     timestamp = None
                     if item_tweet_ids:
-                        timestamp = get_latest_tweet_timestamp(item_tweet_ids, tweets_data)
+                        # Try to get tweet timestamps
+                        timestamps = []
+                        for tweet_id in item_tweet_ids:
+                            ts = get_tweet_timestamp(tweet_id, tweets_data)
+                            if ts:
+                                timestamps.append(ts)
+                        
+                        if timestamps:
+                            # Use earliest timestamp (when news first appeared)
+                            timestamp = min(timestamps)
                     
                     # Fallback to generation timestamp if no tweet timestamp found
+                    # But only use it if it's reasonable (not in the future)
                     if not timestamp:
                         try:
-                            timestamp = datetime.fromisoformat(generation_timestamp.replace('Z', '+00:00'))
+                            gen_ts = datetime.fromisoformat(generation_timestamp.replace('Z', '+00:00'))
+                            # Only use generation timestamp if it's not too recent (more than 1 hour ago)
+                            # This prevents showing old news as "just now" when summaries are updated
+                            now = datetime.now(gen_ts.tzinfo) if gen_ts.tzinfo else datetime.now()
+                            if (now - gen_ts).total_seconds() > 3600:  # More than 1 hour old
+                                timestamp = gen_ts
+                            else:
+                                # Generation timestamp is too recent, use a conservative fallback
+                                # Use 24 hours before generation time as a safe fallback
+                                timestamp = gen_ts - timedelta(hours=24)
                         except:
-                            timestamp = datetime.now()
+                            # Last resort: use 24 hours ago
+                            timestamp = datetime.now() - timedelta(hours=24)
                     
                     current_item = {
                         "title": title,
@@ -358,17 +379,37 @@ def parse_trades_items(summary_text: str, tweet_ids: List[str], generation_times
             content_text = re.sub(r'\n\s*\n', '\n\n', content_text)
             content_text = content_text.strip()
             
-            # Get latest timestamp from tweet IDs
+            # Get earliest timestamp from tweet IDs (represents when the trade actually happened)
             timestamp = None
             if item_tweet_ids:
-                timestamp = get_latest_tweet_timestamp(item_tweet_ids, tweets_data)
+                # Try to get tweet timestamps
+                timestamps = []
+                for tweet_id in item_tweet_ids:
+                    ts = get_tweet_timestamp(tweet_id, tweets_data)
+                    if ts:
+                        timestamps.append(ts)
+                
+                if timestamps:
+                    # Use earliest timestamp (when trade first appeared)
+                    timestamp = min(timestamps)
             
             # Fallback to generation timestamp if no tweet timestamp found
+            # But only use it if it's reasonable (not in the future)
             if not timestamp:
                 try:
-                    timestamp = datetime.fromisoformat(generation_timestamp.replace('Z', '+00:00'))
+                    gen_ts = datetime.fromisoformat(generation_timestamp.replace('Z', '+00:00'))
+                    # Only use generation timestamp if it's not too recent (more than 1 hour ago)
+                    # This prevents showing old trades as "just now" when summaries are updated
+                    now = datetime.now(gen_ts.tzinfo) if gen_ts.tzinfo else datetime.now()
+                    if (now - gen_ts).total_seconds() > 3600:  # More than 1 hour old
+                        timestamp = gen_ts
+                    else:
+                        # Generation timestamp is too recent, use a conservative fallback
+                        # Use 24 hours before generation time as a safe fallback
+                        timestamp = gen_ts - timedelta(hours=24)
                 except:
-                    timestamp = datetime.now()
+                    # Last resort: use 24 hours ago
+                    timestamp = datetime.now() - timedelta(hours=24)
             
             current_item = {
                 "title": title,

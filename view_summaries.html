@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Summaries Database Viewer - TwiTracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .summary-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .summary-id {
+            font-size: 24px;
+            font-weight: 600;
+            color: #667eea;
+        }
+        
+        .summary-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .summary-content {
+            margin-top: 15px;
+        }
+        
+        .section {
+            margin-top: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .item {
+            background: white;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .item-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .item-meta {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+        
+        .tweet-ids {
+            font-size: 10px;
+            color: #666;
+            font-family: monospace;
+            margin-top: 5px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 5px;
+        }
+        
+        .timestamp {
+            font-family: monospace;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Summaries Database Viewer</h1>
+        <div class="subtitle">View all summaries, news items, and trades stored in the database</div>
+        
+        <div id="stats-container" class="stats"></div>
+        <div id="error-container"></div>
+        <div id="summaries-container">
+            <div class="loading">Loading summaries...</div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.origin;
+        
+        async function loadSummaries() {
+            try {
+                // Load summaries
+                const response = await fetch(`${API_BASE}/summaries?limit=100&offset=0`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const summaries = data.summaries || [];
+                
+                // Calculate stats
+                let totalNews = 0;
+                let totalTrades = 0;
+                summaries.forEach(s => {
+                    try {
+                        const tweetIds = typeof s.tweet_ids === 'string' ? JSON.parse(s.tweet_ids) : s.tweet_ids;
+                        // Parse summary to count news/trades (rough estimate)
+                        const newsMatches = (s.summary.match(/##\s*News/gi) || []).length;
+                        const tradesMatches = (s.summary.match(/##\s*Trades/gi) || []).length;
+                        totalNews += newsMatches;
+                        totalTrades += tradesMatches;
+                    } catch (e) {
+                        // Ignore parsing errors
+                    }
+                });
+                
+                // Display stats
+                document.getElementById('stats-container').innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${summaries.length}</div>
+                        <div class="stat-label">Total Summaries</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.total || summaries.length}</div>
+                        <div class="stat-label">Total Records</div>
+                    </div>
+                `;
+                
+                // Load merged items to get accurate counts
+                try {
+                    const mergedResponse = await fetch(`${API_BASE}/merged-items?limit=1000&offset=0&item_type=all`);
+                    if (mergedResponse.ok) {
+                        const mergedData = await mergedResponse.json();
+                        document.getElementById('stats-container').innerHTML += `
+                            <div class="stat-card">
+                                <div class="stat-value">${mergedData.total_news || 0}</div>
+                                <div class="stat-label">Total News Items</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${mergedData.total_trades || 0}</div>
+                                <div class="stat-label">Total Trade Items</div>
+                            </div>
+                        `;
+                    }
+                } catch (e) {
+                    console.error('Failed to load merged items:', e);
+                }
+                
+                // Display summaries
+                if (summaries.length === 0) {
+                    document.getElementById('summaries-container').innerHTML = 
+                        '<div class="loading">No summaries found in database.</div>';
+                    return;
+                }
+                
+                const summariesHtml = summaries.map((summary, index) => {
+                    const tweetIds = typeof summary.tweet_ids === 'string' ? 
+                        JSON.parse(summary.tweet_ids) : summary.tweet_ids;
+                    
+                    // Parse summary text to extract news and trades
+                    const newsSection = summary.summary.match(/##\s*News\s*\n([\s\S]*?)(?=##|$)/i);
+                    const tradesSection = summary.summary.match(/##\s*Trades\s*\n([\s\S]*?)(?=##|$)/i);
+                    
+                    const newsItems = newsSection ? newsSection[1].split('\n').filter(line => 
+                        line.trim().startsWith('-') && line.includes('**')
+                    ) : [];
+                    
+                    const tradesItems = tradesSection ? tradesSection[1].split('\n').filter(line => 
+                        line.trim().startsWith('-') && line.includes('**')
+                    ) : [];
+                    
+                    // Format timestamp
+                    const timestamp = new Date(summary.timestamp + 'Z');
+                    const timestampStr = timestamp.toLocaleString('en-US', {
+                        timeZone: 'UTC',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true
+                    }) + ' UTC';
+                    
+                    const createdStr = summary.created_at ? 
+                        new Date(summary.created_at).toLocaleString() : 'N/A';
+                    
+                    return `
+                        <div class="summary-card">
+                            <div class="summary-header">
+                                <div>
+                                    <div class="summary-id">Summary #${index + 1}</div>
+                                    <div style="font-size: 11px; color: #999; margin-top: 3px;">(DB ID: ${summary.id})</div>
+                                </div>
+                                <div class="summary-meta">
+                                    <div><strong>Created:</strong> <span class="timestamp">${createdStr}</span></div>
+                                    <div><strong>Timestamp:</strong> <span class="timestamp">${timestampStr}</span></div>
+                                    <div><strong>Tweet IDs:</strong> ${tweetIds.length}</div>
+                                </div>
+                            </div>
+                            
+                            <div class="summary-content">
+                                ${newsItems.length > 0 ? `
+                                    <div class="section">
+                                        <div class="section-title">📰 News (${newsItems.length} items)</div>
+                                        ${newsItems.slice(0, 5).map(item => {
+                                            const titleMatch = item.match(/\*\*(.+?)\*\*/);
+                                            const title = titleMatch ? titleMatch[1] : item.substring(0, 80);
+                                            return `
+                                                <div class="item">
+                                                    <div class="item-title">${title}</div>
+                                                    <div class="item-meta">${item.substring(0, 200)}...</div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                        ${newsItems.length > 5 ? `<div style="color: #999; font-size: 12px; margin-top: 10px;">+ ${newsItems.length - 5} more news items</div>` : ''}
+                                    </div>
+                                ` : ''}
+                                
+                                ${tradesItems.length > 0 ? `
+                                    <div class="section">
+                                        <div class="section-title">💰 Trades (${tradesItems.length} items)</div>
+                                        ${tradesItems.slice(0, 5).map(item => {
+                                            const titleMatch = item.match(/\*\*(.+?)\*\*/);
+                                            const title = titleMatch ? titleMatch[1] : item.substring(0, 80);
+                                            return `
+                                                <div class="item">
+                                                    <div class="item-title">${title}</div>
+                                                    <div class="item-meta">${item.substring(0, 200)}...</div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                        ${tradesItems.length > 5 ? `<div style="color: #999; font-size: 12px; margin-top: 10px;">+ ${tradesItems.length - 5} more trade items</div>` : ''}
+                                    </div>
+                                ` : ''}
+                                
+                                <div class="section">
+                                    <div class="section-title">🔗 Tweet IDs</div>
+                                    <div class="tweet-ids">${tweetIds.slice(0, 10).join(', ')}${tweetIds.length > 10 ? ` ... (+${tweetIds.length - 10} more)` : ''}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                document.getElementById('summaries-container').innerHTML = summariesHtml;
+                
+            } catch (error) {
+                document.getElementById('error-container').innerHTML = 
+                    `<div class="error">Error loading summaries: ${error.message}</div>`;
+                document.getElementById('summaries-container').innerHTML = 
+                    '<div class="loading">Failed to load summaries.</div>';
+            }
+        }
+        
+        // Load on page load
+        loadSummaries();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadSummaries, 30000);
+    </script>
+</body>
+</html>
+

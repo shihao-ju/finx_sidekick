@@ -83,6 +83,7 @@ def init_database():
 def save_summary(summary: str, tweet_ids: List[str], generation_timestamp: Optional[str] = None) -> int:
     """
     Save a summary to the database.
+    If a summary with the same tweet_ids already exists, updates it instead of creating a duplicate.
     
     Args:
         summary: The markdown summary text
@@ -90,7 +91,7 @@ def save_summary(summary: str, tweet_ids: List[str], generation_timestamp: Optio
         generation_timestamp: ISO format timestamp (defaults to now)
     
     Returns:
-        The ID of the saved summary
+        The ID of the saved/updated summary
     """
     if generation_timestamp is None:
         generation_timestamp = datetime.now().isoformat()
@@ -98,12 +99,39 @@ def save_summary(summary: str, tweet_ids: List[str], generation_timestamp: Optio
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    cursor.execute("""
-        INSERT INTO summaries (timestamp, summary, tweet_ids)
-        VALUES (?, ?, ?)
-    """, (generation_timestamp, summary, json.dumps(tweet_ids)))
+    # Normalize tweet_ids for comparison (sort and convert to set then back to list for consistent comparison)
+    normalized_tweet_ids = sorted(set(str(tid) for tid in tweet_ids))
+    tweet_ids_json = json.dumps(normalized_tweet_ids)
     
-    summary_id = cursor.lastrowid
+    # Check if a summary with the same tweet_ids already exists
+    cursor.execute("""
+        SELECT id FROM summaries
+        WHERE tweet_ids = ?
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """, (tweet_ids_json,))
+    
+    existing = cursor.fetchone()
+    
+    if existing:
+        # Update existing summary instead of creating duplicate
+        # IMPORTANT: Preserve the original timestamp to maintain chronological accuracy
+        # Only update the summary content, not the timestamp
+        summary_id = existing[0]
+        cursor.execute("""
+            UPDATE summaries
+            SET summary = ?
+            WHERE id = ?
+        """, (summary, summary_id))
+        print(f"[INFO] Updated existing summary {summary_id} with same tweet_ids (avoiding duplicate, preserving original timestamp)")
+    else:
+        # Create new summary
+        cursor.execute("""
+            INSERT INTO summaries (timestamp, summary, tweet_ids)
+            VALUES (?, ?, ?)
+        """, (generation_timestamp, summary, tweet_ids_json))
+        summary_id = cursor.lastrowid
+    
     conn.commit()
     conn.close()
     
@@ -403,6 +431,62 @@ def log_scheduler_event(account_handle: Optional[str], fetch_type: Optional[str]
     conn.close()
     
     return log_id
+
+
+def remove_duplicate_summaries() -> Dict:
+    """
+    Remove duplicate summaries that have the same tweet_ids.
+    Keeps the newest summary for each unique set of tweet_ids.
+    
+    Returns:
+        Dict with counts of duplicates removed
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Get all summaries grouped by tweet_ids
+    cursor.execute("""
+        SELECT id, tweet_ids, timestamp
+        FROM summaries
+        ORDER BY timestamp DESC
+    """)
+    
+    all_summaries = cursor.fetchall()
+    
+    # Track seen tweet_ids sets and duplicates to remove
+    seen_tweet_ids = {}
+    duplicates_to_remove = []
+    
+    for summary_id, tweet_ids_json, timestamp in all_summaries:
+        # Normalize tweet_ids for comparison
+        try:
+            tweet_ids = json.loads(tweet_ids_json)
+            normalized_tweet_ids = tuple(sorted(set(str(tid) for tid in tweet_ids)))
+        except:
+            # Skip if can't parse
+            continue
+        
+        if normalized_tweet_ids in seen_tweet_ids:
+            # This is a duplicate - mark for removal
+            duplicates_to_remove.append(summary_id)
+        else:
+            # First time seeing this set of tweet_ids - keep it
+            seen_tweet_ids[normalized_tweet_ids] = summary_id
+    
+    # Remove duplicates
+    removed_count = 0
+    for summary_id in duplicates_to_remove:
+        cursor.execute("DELETE FROM summaries WHERE id = ?", (summary_id,))
+        removed_count += 1
+    
+    conn.commit()
+    conn.close()
+    
+    return {
+        "duplicates_removed": removed_count,
+        "unique_summaries": len(seen_tweet_ids),
+        "total_before": len(all_summaries)
+    }
 
 
 def get_scheduler_logs(limit: int = 50, offset: int = 0, 

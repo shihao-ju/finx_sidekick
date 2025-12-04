@@ -450,7 +450,31 @@
                         return `
                             <div class="schedule-item log-entry ${statusClass}">
                                 <div>
-                                    <div class="timestamp" style="font-size: 11px; color: #666; margin-bottom: 4px;">${new Date(log.timestamp).toLocaleString()}</div>
+                                    <div class="timestamp" style="font-size: 11px; color: #666; margin-bottom: 4px;">
+                                        ${(() => {
+                                            const date = new Date(log.timestamp + 'Z'); // Add Z to indicate UTC
+                                            const utcTime = date.toLocaleString('en-US', {
+                                                timeZone: 'UTC',
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                                second: '2-digit',
+                                                hour12: true
+                                            });
+                                            const localTime = date.toLocaleString('en-US', {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                                second: '2-digit',
+                                                hour12: true
+                                            });
+                                            return `${utcTime} UTC${utcTime !== localTime ? ` (${localTime} local)` : ''}`;
+                                        })()}
+                                    </div>
                                     <div class="message">
                                         <strong>${log.fetch_type || 'N/A'}</strong> - ${log.status}
                                         ${log.error_message ? `: ${log.error_message}` : ''}

@@ -1195,10 +1195,28 @@ async def refresh_brief_logic() -> Optional[Dict]:
     # If no new tweets, return the cleaned previous summary without regenerating
     if len(all_new_tweets) == 0:
         log(f"[DEBUG] No new tweets found - returning cleaned previous summary without regeneration")
+        
+        # Update account tracking timestamps even if no new tweets (to record the fetch attempt)
+        current_timestamp_utc = datetime.now(pytz.UTC).isoformat()
+        for handle in accounts:
+            update_params = {
+                "handle": handle,
+                "last_tweet_id": account_last_tweet_ids.get(handle),
+                "last_fetch_timestamp_utc": current_timestamp_utc
+            }
+            log(f"[DEBUG] Updating account tracking for {handle}: last_tweet_id={update_params.get('last_tweet_id')}, timestamp={current_timestamp_utc}")
+            update_account_tracking(**update_params)
+        
         if combined_previous_summary and combined_previous_summary.strip():
             cleaned_summary = clean_summary(combined_previous_summary)
             log_file.close()
-            return RefreshResponse(summary=cleaned_summary)
+            # Return dict for scheduler use (not RefreshResponse)
+            return {
+                "summary": cleaned_summary,
+                "tweet_count": 0,
+                "summary_id": None,
+                "accounts": accounts
+            }
         else:
             log_file.close()
             raise HTTPException(status_code=400, detail="No tweets found and no previous summary available. Please wait for new tweets or check your monitored accounts.")
@@ -1450,7 +1468,7 @@ async def refresh_brief_dev(response: Response):
 
 @app.post("/refresh-brief-ui-dev", response_model=RefreshResponse)
 async def refresh_brief_ui_dev(response: Response):
-    """UI Development endpoint: Returns saved summary from state.json without any API calls."""
+    """UI Development endpoint: Returns latest summary from database without any API calls."""
     # Prevent caching
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -1464,26 +1482,16 @@ async def refresh_brief_ui_dev(response: Response):
     
     log("[DEBUG] ========== /refresh-brief-ui-dev CALLED (UI DEV MODE) ==========")
     
-    # Get combined previous summary from state
-    accounts = get_monitored_account_handles()
-    if not accounts:
+    # Get latest summary from database
+    latest_summary_obj = get_latest_summary()
+    
+    if not latest_summary_obj or not latest_summary_obj.get("summary", "").strip():
         log_file.close()
-        raise HTTPException(status_code=400, detail="No accounts monitored. Please add accounts first.")
+        raise HTTPException(status_code=400, detail="No saved summary found in database. Please run a normal refresh first.")
     
-    previous_summaries = []
-    for handle in accounts:
-        context = get_session_context(handle)
-        prev_summary = context.get("previous_summary", "")
-        if prev_summary:
-            previous_summaries.append(prev_summary)
+    combined_previous_summary = latest_summary_obj.get("summary", "")
     
-    combined_previous_summary = "\n\n".join(previous_summaries) if previous_summaries else ""
-    
-    if not combined_previous_summary or not combined_previous_summary.strip():
-        log_file.close()
-        raise HTTPException(status_code=400, detail="No saved summary found in state.json. Please run a normal refresh first.")
-    
-    log(f"[DEBUG] Returning saved summary (length: {len(combined_previous_summary)})")
+    log(f"[DEBUG] Returning saved summary from database (length: {len(combined_previous_summary)})")
     log_file.close()
     
     return RefreshResponse(summary=combined_previous_summary)
@@ -1594,32 +1602,6 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
     # Get all summaries from database
     all_summaries = get_summaries(limit=1000, offset=0)  # Get all summaries
     
-    # If database is empty or has minimal data, try to load from state.json as fallback
-    if not all_summaries or (len(all_summaries) == 1 and len(all_summaries[0].get("summary", "")) < 100):
-        import json as json_module
-        if os.path.exists("state.json"):
-            try:
-                with open("state.json", "r", encoding="utf-8") as f:
-                    state_data = json_module.load(f)
-                    # Try to get summary from any account in session_context
-                    for account, context in state_data.get("session_context", {}).items():
-                        prev_summary = context.get("previous_summary", "")
-                        if prev_summary and len(prev_summary) > 100:
-                            # Extract tweet IDs from summary if possible
-                            from tweet_utils import extract_tweet_ids_from_summary
-                            tweet_ids = extract_tweet_ids_from_summary(prev_summary)
-                            if not tweet_ids:
-                                tweet_ids = []
-                            # Add to summaries list
-                            all_summaries.append({
-                                "summary": prev_summary,
-                                "tweet_ids": tweet_ids,
-                                "timestamp": datetime.now().isoformat()
-                            })
-                            break  # Use first valid summary found
-            except Exception as e:
-                print(f"[WARNING] Failed to load summary from state.json: {e}", file=sys.stderr, flush=True)
-    
     # Parse all news and trades items
     all_news = []
     all_trades = []
@@ -1640,6 +1622,118 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
             tweets_data
         )
         all_trades.extend(trades_items)
+    
+    # Deduplicate news and trades items
+    # Strategy: Use fuzzy matching on titles + tweet ID overlap to detect duplicates
+    def normalize_title(title: str) -> str:
+        """Normalize title for comparison (lowercase, remove extra spaces, remove markdown)"""
+        import re
+        if not title:
+            return ""
+        # Remove markdown formatting (handle ** anywhere in title)
+        normalized = title.replace("**", "").replace("*", "").strip()
+        # Remove ticker symbols for better matching ($SNOW -> SNOW)
+        normalized = re.sub(r'\$([A-Z]{1,5})\b', r'\1', normalized)
+        # Lowercase and remove extra spaces
+        normalized = " ".join(normalized.lower().split())
+        return normalized
+    
+    def extract_ticker_from_title(title: str) -> Optional[str]:
+        """Extract ticker symbol from title (e.g., $SNOW -> SNOW)"""
+        import re
+        match = re.search(r'\$([A-Z]{1,5})\b', title)
+        return match.group(1) if match else None
+    
+    def titles_similar(title1: str, title2: str, threshold: float = 0.6) -> bool:
+        """Check if two titles are similar using word overlap"""
+        norm1 = normalize_title(title1)
+        norm2 = normalize_title(title2)
+        
+        # Exact match after normalization
+        if norm1 == norm2:
+            return True
+        
+        # Word-based similarity
+        words1 = set(norm1.split())
+        words2 = set(norm2.split())
+        
+        if not words1 or not words2:
+            return False
+        
+        # Calculate Jaccard similarity (intersection over union)
+        intersection = len(words1 & words2)
+        union = len(words1 | words2)
+        similarity = intersection / union if union > 0 else 0
+        
+        return similarity >= threshold
+    
+    def tweet_ids_overlap(ids1: List[str], ids2: List[str]) -> bool:
+        """Check if tweet ID sets overlap significantly"""
+        set1 = set(str(tid) for tid in ids1)
+        set2 = set(str(tid) for tid in ids2)
+        
+        if not set1 or not set2:
+            return False
+        
+        # If sets are identical, definitely overlap
+        if set1 == set2:
+            return True
+        
+        # If one set is subset of another, overlap
+        if set1.issubset(set2) or set2.issubset(set1):
+            return True
+        
+        # If they share significant overlap (at least 50% of smaller set)
+        intersection = len(set1 & set2)
+        min_set_size = min(len(set1), len(set2))
+        
+        return intersection > 0 and (intersection / min_set_size >= 0.5)
+    
+    def deduplicate_items(items: List[Dict]) -> List[Dict]:
+        """Remove duplicate items using fuzzy title matching and tweet ID overlap"""
+        # Sort by timestamp (newest first) so we keep newer versions
+        items_sorted = sorted(items, key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        kept_items = []
+        for item in items_sorted:
+            is_duplicate = False
+            item_title = item.get("title", "")
+            item_tweet_ids = item.get("tweet_ids", [])
+            item_ticker = extract_ticker_from_title(item_title)
+            
+            # Check against all kept items
+            for kept_item in kept_items:
+                kept_title = kept_item.get("title", "")
+                kept_tweet_ids = kept_item.get("tweet_ids", [])
+                kept_ticker = extract_ticker_from_title(kept_title)
+                
+                # If tweet IDs overlap significantly
+                ids_overlap = tweet_ids_overlap(item_tweet_ids, kept_tweet_ids)
+                
+                if ids_overlap:
+                    # If tweet IDs match exactly, deduplicate even with lower title similarity
+                    set1 = set(str(tid) for tid in item_tweet_ids)
+                    set2 = set(str(tid) for tid in kept_tweet_ids)
+                    exact_match = (set1 == set2)
+                    
+                    # Check title similarity
+                    title_sim = titles_similar(item_title, kept_title, threshold=0.6 if exact_match else 0.7)
+                    
+                    # Also check if they mention the same ticker (for ticker-specific news)
+                    same_ticker = (item_ticker and kept_ticker and item_ticker == kept_ticker)
+                    
+                    # Deduplicate if: (titles similar) OR (same ticker + exact tweet IDs)
+                    if title_sim or (same_ticker and exact_match):
+                        is_duplicate = True
+                        break
+            
+            if not is_duplicate:
+                kept_items.append(item)
+        
+        return kept_items
+    
+    all_news = deduplicate_items(all_news)
+    all_trades = deduplicate_items(all_trades)
     
     # Sort by timestamp (newest first)
     all_news.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -1665,6 +1759,21 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
 
 
 # ==================== Admin API Endpoints ====================
+
+@app.post("/api/summaries/remove-duplicates")
+async def remove_duplicate_summaries_endpoint():
+    """Remove duplicate summaries that have the same tweet_ids."""
+    try:
+        from database import remove_duplicate_summaries
+        result = remove_duplicate_summaries()
+        return {
+            "status": "success",
+            "message": f"Removed {result['duplicates_removed']} duplicate summaries",
+            **result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/scheduler/status")
 async def get_scheduler_status():
@@ -1821,6 +1930,16 @@ async def admin_page():
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Admin page not found</h1>", status_code=404)
+
+
+@app.get("/view-summaries")
+async def view_summaries_page():
+    """Serve the summaries database viewer page."""
+    try:
+        with open("view_summaries.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Summaries viewer page not found</h1>", status_code=404)
 
 
 if __name__ == "__main__":
