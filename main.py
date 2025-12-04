@@ -1952,6 +1952,26 @@ async def get_all_news_thoughts(limit: int = 20, offset: int = 0):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/news/thought/{news_hash}")
+async def delete_news_thought_endpoint(news_hash: str):
+    """Delete a thought for a news item."""
+    try:
+        from database import delete_news_thought
+        deleted = delete_news_thought(news_hash)
+        if deleted:
+            return {"status": "success", "message": "Thought deleted"}
+        else:
+            raise HTTPException(status_code=404, detail="Thought not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import sys
+        print(f"[ERROR] Error deleting thought: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== Admin API Endpoints ====================
 
 @app.post("/api/summaries/remove-duplicates")

@@ -297,6 +297,8 @@
                 <button class="btn-warning" id="btn-trigger" onclick="triggerScheduler()">⚡ Trigger Now</button>
                 <button class="btn-primary" id="btn-refresh" onclick="refreshAll()">🔄 Refresh</button>
                 <button class="btn-warning" id="btn-test" onclick="testScheduler()" style="background: #17a2b8; color: white;">🧪 Test Schedule (60s)</button>
+                <button class="btn-warning" id="btn-dev-sample" onclick="refreshBriefDev()" style="background: #ff9800; color: white;">🧪 Refresh Market Intel (Dev - Uses Sample Data)</button>
+                <button class="btn-warning" id="btn-dev-ui" onclick="refreshBriefUIDev()" style="background: #9c27b0; color: white;">🎨 UI Dev - Load Saved Summary (No API Calls)</button>
             </div>
         </div>
         
@@ -554,6 +556,54 @@
                 }
             } catch (error) {
                 showError(`Failed to schedule test job: ${error.message}`);
+            }
+        }
+        
+        async function refreshBriefDev() {
+            try {
+                showSuccess('Triggering dev refresh with sample data...');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+                
+                const response = await fetch(`${API_BASE}/refresh-brief-dev`, {
+                    method: 'POST',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showSuccess('Dev refresh completed successfully! Check the main page to see the updated summary.');
+                    setTimeout(() => refreshAll(), 2000); // Refresh logs after 2 seconds
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to refresh brief (dev mode)');
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    showError('Request timed out after 5 minutes');
+                } else {
+                    showError(`Error refreshing brief (dev mode): ${error.message}`);
+                }
+            }
+        }
+        
+        async function refreshBriefUIDev() {
+            try {
+                showSuccess('Loading saved summary from database...');
+                const response = await fetch(`${API_BASE}/refresh-brief-ui-dev`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showSuccess('Saved summary loaded successfully! Check the main page to see the summary.');
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to load saved summary');
+                }
+            } catch (error) {
+                showError(`Error loading saved summary: ${error.message}`);
             }
         }
         

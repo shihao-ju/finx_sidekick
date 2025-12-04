@@ -853,7 +853,20 @@ def save_news_thought(news_hash: str, thought: str, title: Optional[str] = None,
     cursor.execute("SELECT id FROM news_thoughts WHERE news_hash = ?", (news_hash,))
     existing = cursor.fetchone()
     
-    print(f"[DEBUG] save_news_thought: hash={news_hash[:16]}..., title={title[:50] if title else 'None'}, has_title_column={has_title_column}, existing={existing is not None}", flush=True)
+    print(f"[DEBUG] save_news_thought: hash={news_hash[:16]}..., title={title[:50] if title else 'None'}, has_title_column={has_title_column}, existing={existing is not None}, thought_empty={not thought or not thought.strip()}", flush=True)
+    
+    # If thought is empty or whitespace-only, delete the record instead of saving
+    if not thought or not thought.strip():
+        if existing:
+            print(f"[DEBUG] Deleting thought record for hash: {news_hash[:16]}...", flush=True)
+            cursor.execute("DELETE FROM news_thoughts WHERE news_hash = ?", (news_hash,))
+            conn.commit()
+            conn.close()
+            return True
+        else:
+            # No existing record to delete
+            conn.close()
+            return True
     
     if existing:
         # Update existing thought
@@ -1013,6 +1026,7 @@ def get_all_news_thoughts(limit: int = 20, offset: int = 0) -> List[Dict]:
                 COALESCE(nl.tweet_ids, '[]') as tweet_ids
             FROM news_thoughts nt
             LEFT JOIN news_likes nl ON nt.news_hash = nl.news_hash
+            WHERE nt.thought IS NOT NULL AND TRIM(nt.thought) != ''
             ORDER BY nt.updated_at DESC
             LIMIT ? OFFSET ?
         """, (limit, offset))
@@ -1112,10 +1126,16 @@ def get_all_news_thoughts(limit: int = 20, offset: int = 0) -> List[Dict]:
         final_title = title or "Unknown"
         print(f"[DEBUG] Final result for thought {row[0]}: title={final_title[:50]}", flush=True)
         
+        # Skip empty thoughts (safety check, though SQL should filter them)
+        thought_text = row[2] if len(row) > 2 else ""
+        if not thought_text or not thought_text.strip():
+            print(f"[DEBUG] Skipping empty thought {row[0]}", flush=True)
+            continue
+        
         result.append({
             "id": row[0],
             "news_hash": row[1],
-            "thought": row[2],
+            "thought": thought_text,
             "created_at": row[3],
             "updated_at": row[4],
             "title": final_title,
@@ -1129,12 +1149,34 @@ def get_all_news_thoughts(limit: int = 20, offset: int = 0) -> List[Dict]:
     return result
 
 
-def get_news_thoughts_count() -> int:
-    """Get total number of thoughts in database."""
+def delete_news_thought(news_hash: str) -> bool:
+    """
+    Delete a thought for a news item.
+    
+    Args:
+        news_hash: Unique hash for the news item
+    
+    Returns:
+        True if deleted successfully, False otherwise
+    """
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COUNT(*) FROM news_thoughts")
+    cursor.execute("DELETE FROM news_thoughts WHERE news_hash = ?", (news_hash,))
+    deleted = cursor.rowcount > 0
+    
+    conn.commit()
+    conn.close()
+    
+    return deleted
+
+
+def get_news_thoughts_count() -> int:
+    """Get total number of non-empty thoughts in database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM news_thoughts WHERE thought IS NOT NULL AND TRIM(thought) != ''")
     count = cursor.fetchone()[0]
     conn.close()
     
