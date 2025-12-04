@@ -1006,6 +1006,115 @@
                 display: none;
             }
         }
+
+        /* Login Button Styles */
+        .login-button {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+
+        .login-button:hover {
+            background: rgba(102, 126, 234, 1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-button.logged-in {
+            background: rgba(40, 167, 69, 0.9);
+        }
+
+        .login-button.logged-in:hover {
+            background: rgba(40, 167, 69, 1);
+        }
+
+        /* Login Modal */
+        .login-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .login-modal.show {
+            display: flex;
+        }
+
+        .login-modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-modal-content h3 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .login-modal-content input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+
+        .login-modal-content input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .login-modal-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .login-modal-btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .login-modal-btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .disabled-input {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -1065,6 +1174,21 @@
         </div>
     </div>
 
+    <!-- Login Button -->
+    <button class="login-button" id="loginButton" onclick="showLoginModal()">Login</button>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="login-modal">
+        <div class="login-modal-content">
+            <h3>Enter Admin Token</h3>
+            <input type="password" id="loginTokenInput" placeholder="Enter admin token" />
+            <div class="login-modal-actions">
+                <button class="login-modal-btn-secondary" onclick="closeLoginModal()">Cancel</button>
+                <button class="login-modal-btn-primary" onclick="handleLogin()">Login</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Thought Modal -->
     <div id="thoughtModal" class="thought-modal">
         <div class="thought-modal-content">
@@ -1082,14 +1206,159 @@
     </div>
 
     <script>
-        // Use port 8002 for API calls
-        const API_BASE = window.location.protocol + '//' + window.location.hostname + ':8002';
+        // Use current origin for API calls
+        const API_BASE = window.location.origin;
         
         // Global state for pagination
         let currentOffset = 0;
         let currentItemType = 'all'; // 'all', 'news', 'trades'
         let totalItems = 0;
         let showingHistorical = false;
+
+        // Authentication state
+        let authToken = localStorage.getItem('adminToken') || null;
+        
+        // Get auth headers for API calls
+        function getAuthHeaders() {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (authToken) {
+                headers['X-Admin-Token'] = authToken;
+            }
+            return headers;
+        }
+
+        // Check authentication status and update UI
+        function updateAuthUI() {
+            const isAuthenticated = !!authToken;
+            const loginButton = document.getElementById('loginButton');
+            const accountInput = document.getElementById('accountInput');
+            const addButton = document.querySelector('.account-input-group .btn');
+            const chatInput = document.getElementById('chatInput');
+            const chatSendButton = document.getElementById('chatSendButton');
+
+            // Update login button
+            if (loginButton) {
+                if (isAuthenticated) {
+                    loginButton.textContent = 'Logout';
+                    loginButton.classList.add('logged-in');
+                } else {
+                    loginButton.textContent = 'Login';
+                    loginButton.classList.remove('logged-in');
+                }
+            }
+
+            // Disable/enable account management
+            if (accountInput) {
+                accountInput.disabled = !isAuthenticated;
+                accountInput.classList.toggle('disabled-input', !isAuthenticated);
+                if (!isAuthenticated) {
+                    accountInput.placeholder = 'Login to add accounts';
+                } else {
+                    accountInput.placeholder = '@username';
+                }
+            }
+            if (addButton) {
+                addButton.disabled = !isAuthenticated;
+            }
+            
+            // Update remove buttons
+            const removeButtons = document.querySelectorAll('.accounts-list .btn-danger');
+            removeButtons.forEach(btn => {
+                btn.disabled = !isAuthenticated;
+            });
+
+            // Disable/enable chat input
+            if (chatInput) {
+                chatInput.disabled = !isAuthenticated;
+                chatInput.classList.toggle('disabled-input', !isAuthenticated);
+                if (!isAuthenticated) {
+                    chatInput.placeholder = 'Login to ask questions';
+                } else {
+                    chatInput.placeholder = 'Ask a question about the summary (e.g., \'Explain the butterfly strategy\')';
+                }
+            }
+            if (chatSendButton) {
+                chatSendButton.disabled = !isAuthenticated;
+            }
+        }
+
+        // Show login modal
+        function showLoginModal() {
+            if (authToken) {
+                // Logout
+                authToken = null;
+                localStorage.removeItem('adminToken');
+                updateAuthUI();
+            } else {
+                // Show login modal
+                const modal = document.getElementById('loginModal');
+                const input = document.getElementById('loginTokenInput');
+                if (modal) {
+                    modal.classList.add('show');
+                    if (input) {
+                        input.value = '';
+                        setTimeout(() => input.focus(), 100);
+                    }
+                }
+            }
+        }
+
+        // Close login modal
+        function closeLoginModal() {
+            const modal = document.getElementById('loginModal');
+            if (modal) {
+                modal.classList.remove('show');
+            }
+        }
+
+        // Handle login
+        function handleLogin() {
+            const input = document.getElementById('loginTokenInput');
+            const token = input ? input.value.trim() : '';
+            
+            if (!token) {
+                alert('Please enter a token');
+                return;
+            }
+
+            // Store token
+            authToken = token;
+            localStorage.setItem('adminToken', token);
+            
+            // Close modal and update UI
+            closeLoginModal();
+            updateAuthUI();
+        }
+
+        // Handle Enter key in login modal
+        document.addEventListener('DOMContentLoaded', function() {
+            const tokenInput = document.getElementById('loginTokenInput');
+            if (tokenInput) {
+                tokenInput.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter') {
+                        handleLogin();
+                    }
+                    if (event.key === 'Escape') {
+                        closeLoginModal();
+                    }
+                });
+            }
+
+            // Close modal on outside click
+            const modal = document.getElementById('loginModal');
+            if (modal) {
+                modal.addEventListener('click', function(event) {
+                    if (event.target === modal) {
+                        closeLoginModal();
+                    }
+                });
+            }
+
+            // Initialize auth UI
+            updateAuthUI();
+        });
 
         // Load accounts on page load
         async function loadAccounts() {
@@ -1123,6 +1392,7 @@
             
             if (accounts.length === 0) {
                 list.innerHTML = '<li style="color: #999; font-style: italic;">No accounts added yet</li>';
+                updateAuthUI(); // Update UI after rendering
                 return;
             }
 
@@ -1136,10 +1406,11 @@
                         ${username ? `<span style="font-weight: 600; color: #333;">${username}</span>` : ''}
                         <span style="color: #666; font-size: 0.9em;">@${handle}</span>
                     </div>
-                    <button class="btn btn-danger" onclick="removeAccount('${handle}')">Remove</button>
+                    <button class="btn btn-danger" onclick="removeAccount('${handle}')" ${!authToken ? 'disabled' : ''}>Remove</button>
                 `;
                 list.appendChild(li);
             });
+            updateAuthUI(); // Update UI after rendering accounts
         }
 
         async function addAccount() {
@@ -1154,9 +1425,7 @@
             try {
                 const response = await fetch(`${API_BASE}/manage-accounts`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ handle: handle })
                 });
 
@@ -1167,7 +1436,14 @@
                     clearError();
                 } else {
                     const error = await response.json();
-                    showError(error.detail || 'Failed to add account');
+                    if (response.status === 401) {
+                        authToken = null;
+                        localStorage.removeItem('adminToken');
+                        updateAuthUI();
+                        showError('Authentication required. Please login.');
+                    } else {
+                        showError(error.detail || 'Failed to add account');
+                    }
                 }
             } catch (error) {
                 showError('Error adding account: ' + error.message);
@@ -1177,7 +1453,8 @@
         async function removeAccount(handle) {
             try {
                 const response = await fetch(`${API_BASE}/manage-accounts/${handle}`, {
-                    method: 'DELETE'
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -1185,7 +1462,14 @@
                     displayAccounts(data.accounts);
                 } else {
                     const error = await response.json();
-                    showError(error.detail || 'Failed to remove account');
+                    if (response.status === 401) {
+                        authToken = null;
+                        localStorage.removeItem('adminToken');
+                        updateAuthUI();
+                        showError('Authentication required. Please login.');
+                    } else {
+                        showError(error.detail || 'Failed to remove account');
+                    }
                 }
             } catch (error) {
                 showError('Error removing account: ' + error.message);
@@ -2407,9 +2691,7 @@
             try {
                 const response = await fetch(`${API_BASE}/chat`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         question: question,
                         summary: window.currentSummary || ''
@@ -2417,6 +2699,12 @@
                 });
                 
                 if (!response.ok) {
+                    if (response.status === 401) {
+                        authToken = null;
+                        localStorage.removeItem('adminToken');
+                        updateAuthUI();
+                        throw new Error('Authentication required. Please login.');
+                    }
                     throw new Error('Failed to get response from chat API');
                 }
                 

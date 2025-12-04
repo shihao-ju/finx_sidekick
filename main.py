@@ -8,13 +8,14 @@ import asyncio
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import pytz
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import httpx
 from openai import OpenAI
+from typing import Optional
 
 # Fix Windows console encoding for Unicode characters
 if sys.platform == 'win32':
@@ -52,6 +53,38 @@ from summary_parser import parse_news_items, parse_trades_items
 load_dotenv(dotenv_path=".env", override=True)
 
 app = FastAPI(title="Financial Signal Aggregator API")
+
+# Authentication
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-token-change-in-production")
+
+def verify_admin_token_query(token: Optional[str] = Query(None)):
+    """Verify admin token from query parameter."""
+    if not token or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+    return token
+
+def verify_token(token: str):
+    """Verify token value."""
+    if not token or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+    return token
+
+def verify_admin_token_header(x_admin_token: Optional[str] = Header(None)):
+    """Verify admin token from X-Admin-Token header (for main page API calls)."""
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+    return x_admin_token
+
+def verify_auth_token(x_admin_token: Optional[str] = Header(None)):
+    """Verify auth token from X-Admin-Token header (same token for both admin and regular auth)."""
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return x_admin_token
+
+# Dependencies
+require_admin_query = Depends(verify_admin_token_query)
+require_admin_header = Depends(verify_admin_token_header)
+require_auth = Depends(verify_auth_token)
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -1053,7 +1086,7 @@ async def get_accounts():
 
 
 @app.post("/manage-accounts")
-async def manage_accounts(request: AccountRequest):
+async def manage_accounts(request: AccountRequest, token: str = require_auth):
     """Add a Twitter handle to monitored accounts."""
     handle = request.handle.strip().lstrip('@')
     if not handle:
@@ -1076,7 +1109,7 @@ async def manage_accounts(request: AccountRequest):
 
 
 @app.delete("/manage-accounts/{handle}")
-async def delete_account(handle: str):
+async def delete_account(handle: str, token: str = require_auth):
     """Remove a Twitter handle from monitored accounts."""
     if remove_account(handle):
         accounts_data = get_monitored_accounts()
@@ -1370,7 +1403,8 @@ async def refresh_brief_logic() -> Optional[Dict]:
 
 
 @app.post("/refresh-brief-dev", response_model=RefreshResponse)
-async def refresh_brief_dev(response: Response):
+async def refresh_brief_dev(response: Response, token: str = Query(...)):
+    verify_token(token)
     # Prevent caching
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -1528,7 +1562,8 @@ async def refresh_brief_dev(response: Response):
 
 
 @app.post("/refresh-brief-ui-dev", response_model=RefreshResponse)
-async def refresh_brief_ui_dev(response: Response):
+async def refresh_brief_ui_dev(response: Response, token: str = Query(...)):
+    verify_token(token)
     """UI Development endpoint: Returns latest summary from database without any API calls."""
     # Prevent caching
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -1559,7 +1594,7 @@ async def refresh_brief_ui_dev(response: Response):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, token: str = require_auth):
     """Chat endpoint for asking questions about the financial summary."""
     if not openai_client:
         raise HTTPException(status_code=500, detail="AI Builder API key not configured")
@@ -1990,7 +2025,7 @@ async def remove_duplicate_summaries_endpoint():
 
 
 @app.get("/api/scheduler/status")
-async def get_scheduler_status():
+async def get_scheduler_status(token: str = require_admin_query):
     """Get scheduler status and configuration."""
     try:
         from scheduler import get_scheduler_manager
@@ -2002,7 +2037,8 @@ async def get_scheduler_status():
 
 
 @app.post("/api/scheduler/pause")
-async def pause_scheduler():
+async def pause_scheduler(token: str = Query(...)):
+    verify_token(token)
     """Pause the scheduler."""
     try:
         from scheduler import get_scheduler_manager
@@ -2014,7 +2050,8 @@ async def pause_scheduler():
 
 
 @app.post("/api/scheduler/resume")
-async def resume_scheduler():
+async def resume_scheduler(token: str = Query(...)):
+    verify_token(token)
     """Resume the scheduler."""
     try:
         from scheduler import get_scheduler_manager
@@ -2026,7 +2063,8 @@ async def resume_scheduler():
 
 
 @app.post("/api/scheduler/trigger")
-async def trigger_scheduler():
+async def trigger_scheduler(token: str = Query(...)):
+    verify_token(token)
     """Manually trigger a refresh now."""
     try:
         from scheduler import get_scheduler_manager
@@ -2038,7 +2076,8 @@ async def trigger_scheduler():
 
 
 @app.post("/api/scheduler/test")
-async def test_scheduler(seconds: int = 60):
+async def test_scheduler(seconds: int = 60, token: str = Query(...)):
+    verify_token(token)
     """
     Schedule a test job that will run automatically in X seconds.
     Useful for testing scheduler functionality without waiting for the next scheduled time.
@@ -2070,7 +2109,7 @@ async def test_scheduler(seconds: int = 60):
 
 
 @app.get("/api/scheduler/logs")
-async def get_scheduler_logs(limit: int = 50, offset: int = 0):
+async def get_scheduler_logs(limit: int = 50, offset: int = 0, token: str = Query(...)):
     """Get scheduler logs."""
     try:
         from database import get_scheduler_logs
@@ -2081,7 +2120,7 @@ async def get_scheduler_logs(limit: int = 50, offset: int = 0):
 
 
 @app.get("/api/scheduler/config")
-async def get_scheduler_config():
+async def get_scheduler_config(token: str = Query(...)):
     """Get scheduler configuration."""
     try:
         from config import load_config
@@ -2092,7 +2131,8 @@ async def get_scheduler_config():
 
 
 @app.post("/api/scheduler/config")
-async def update_scheduler_config(config_update: Dict):
+async def update_scheduler_config(config_update: Dict, token: str = Query(...)):
+    verify_token(token)
     """Update scheduler configuration (currently only supports enabling/disabling)."""
     try:
         import json
@@ -2138,7 +2178,7 @@ async def update_scheduler_config(config_update: Dict):
 
 @app.get("/admin")
 async def admin_page():
-    """Serve the admin page."""
+    """Serve the admin page. Authentication is handled client-side."""
     try:
         with open("admin.html", "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())

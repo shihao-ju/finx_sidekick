@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from config import get_scheduler_config, is_scheduler_enabled
+from config import get_scheduler_config, is_scheduler_enabled, save_scheduler_config
 from holidays import should_fetch_today
 from database import log_scheduler_event, get_all_accounts
 from storage import get_monitored_account_handles
@@ -22,8 +22,9 @@ class SchedulerManager:
     
     def __init__(self):
         self.scheduler: Optional[AsyncIOScheduler] = None
-        self.is_paused = False
         self.config = get_scheduler_config()
+        # Load paused state from config (persists across restarts)
+        self.is_paused = self.config.get("paused", False)
     
     def start(self):
         """Initialize and start the scheduler."""
@@ -44,7 +45,13 @@ class SchedulerManager:
         self._schedule_weekends()
         
         self.scheduler.start()
-        print("[INFO] Scheduler started successfully")
+        
+        # If we were paused before restart, pause again
+        if self.is_paused:
+            self.scheduler.pause()
+            print("[INFO] Scheduler started in paused state")
+        else:
+            print("[INFO] Scheduler started successfully")
     
     def stop(self):
         """Stop the scheduler."""
@@ -57,19 +64,38 @@ class SchedulerManager:
         if self.scheduler and self.scheduler.running:
             self.scheduler.pause()
             self.is_paused = True
+            self._save_pause_state()
             print("[INFO] Scheduler paused")
     
     def resume(self):
         """Resume the scheduler."""
-        if self.scheduler and self.is_paused:
+        if not self.scheduler:
+            print("[WARNING] Scheduler not initialized")
+            return
+        
+        # Check if scheduler is actually paused (either our state or APScheduler's state)
+        # APScheduler state: 1=running, 2=paused
+        scheduler_paused = self.scheduler.running and hasattr(self.scheduler, 'state') and self.scheduler.state == 2
+        
+        if self.is_paused or scheduler_paused:
             self.scheduler.resume()
             self.is_paused = False
+            self._save_pause_state()
             print("[INFO] Scheduler resumed")
+        else:
+            print("[INFO] Scheduler is not paused")
     
     def trigger_now(self):
         """Manually trigger a refresh now."""
         print("[INFO] Manual trigger requested")
         asyncio.create_task(self._scheduled_refresh("manual"))
+    
+    def _save_pause_state(self):
+        """Save pause state to config.json."""
+        try:
+            save_scheduler_config({"paused": self.is_paused})
+        except Exception as e:
+            print(f"[WARNING] Failed to save pause state: {e}")
     
     def schedule_test_job(self, seconds_from_now: int = 60):
         """

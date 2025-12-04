@@ -81,6 +81,13 @@
         
         .status-item .value.paused {
             color: #dc3545;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .status-item.paused-highlight {
+            border-left-color: #dc3545;
+            background: #fff5f5;
         }
         
         .status-item .value.disabled {
@@ -272,7 +279,7 @@
                     <label>Running</label>
                     <div class="value" id="status-running">-</div>
                 </div>
-                <div class="status-item">
+                <div class="status-item" id="status-paused-item">
                     <label>Paused</label>
                     <div class="value" id="status-paused">-</div>
                 </div>
@@ -322,16 +329,71 @@
     <script>
         const API_BASE = window.location.origin;
         
+        // Get token from URL query parameter or prompt
+        function getTokenFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('token');
+        }
+
+        // Authentication state - get from URL or prompt
+        let authToken = getTokenFromURL();
+        
+        // If no token in URL, prompt for it
+        if (!authToken) {
+            const token = prompt('Admin page requires authentication. Please enter admin token:');
+            if (token && token.trim()) {
+                authToken = token.trim();
+                // Update URL to include token
+                const url = new URL(window.location);
+                url.searchParams.set('token', authToken);
+                window.history.replaceState({}, '', url);
+            } else {
+                window.location.href = '/';
+            }
+        }
+        
+        // Helper to add token to query string
+        function addTokenToURL(url) {
+            const separator = url.includes('?') ? '&' : '?';
+            return `${url}${separator}token=${encodeURIComponent(authToken)}`;
+        }
+        
         async function loadStatus() {
             try {
-                const statusResponse = await fetch(`${API_BASE}/api/scheduler/status`);
+                const statusResponse = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/status`));
                 if (!statusResponse.ok) {
+                    if (statusResponse.status === 401) {
+                        const token = prompt('Authentication failed. Please enter admin token again:');
+                        if (token && token.trim()) {
+                            authToken = token.trim();
+                            const url = new URL(window.location);
+                            url.searchParams.set('token', authToken);
+                            window.history.replaceState({}, '', url);
+                            return loadStatus();
+                        } else {
+                            window.location.href = '/';
+                            return;
+                        }
+                    }
                     throw new Error(`Status API error: ${statusResponse.status} ${statusResponse.statusText}`);
                 }
                 const statusData = await statusResponse.json();
                 
-                const configResponse = await fetch(`${API_BASE}/api/scheduler/config`);
+                const configResponse = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/config`));
                 if (!configResponse.ok) {
+                    if (configResponse.status === 401) {
+                        const token = prompt('Authentication failed. Please enter admin token again:');
+                        if (token && token.trim()) {
+                            authToken = token.trim();
+                            const url = new URL(window.location);
+                            url.searchParams.set('token', authToken);
+                            window.history.replaceState({}, '', url);
+                            return loadStatus();
+                        } else {
+                            window.location.href = '/';
+                            return;
+                        }
+                    }
                     throw new Error(`Config API error: ${configResponse.status} ${configResponse.statusText}`);
                 }
                 const configData = await configResponse.json();
@@ -346,12 +408,37 @@
                 document.getElementById('status-running').textContent = statusData.running ? 'Yes' : 'No';
                 document.getElementById('status-running').className = `value ${statusData.running ? 'running' : 'disabled'}`;
                 
-                document.getElementById('status-paused').textContent = statusData.paused ? 'Yes' : 'No';
-                document.getElementById('status-paused').className = `value ${statusData.paused ? 'paused' : ''}`;
+                // Update paused status with visual feedback
+                const pausedElement = document.getElementById('status-paused');
+                const pausedItem = document.getElementById('status-paused-item');
+                if (statusData.paused) {
+                    pausedElement.textContent = 'Yes ⏸';
+                    pausedElement.className = 'value paused';
+                    pausedItem.classList.add('paused-highlight');
+                } else {
+                    pausedElement.textContent = 'No';
+                    pausedElement.className = 'value';
+                    pausedItem.classList.remove('paused-highlight');
+                }
                 
-                // Update button states
-                document.getElementById('btn-resume').disabled = !statusData.paused || !configData.enabled;
-                document.getElementById('btn-pause').disabled = statusData.paused || !statusData.running;
+                // Update button states and visual feedback
+                const resumeBtn = document.getElementById('btn-resume');
+                const pauseBtn = document.getElementById('btn-pause');
+                resumeBtn.disabled = !statusData.paused || !configData.enabled;
+                pauseBtn.disabled = statusData.paused || !statusData.running;
+                
+                // Add visual indicators to buttons
+                if (statusData.paused) {
+                    pauseBtn.style.opacity = '0.5';
+                    pauseBtn.style.cursor = 'not-allowed';
+                    resumeBtn.style.opacity = '1';
+                    resumeBtn.style.cursor = 'pointer';
+                } else {
+                    pauseBtn.style.opacity = pauseBtn.disabled ? '0.5' : '1';
+                    pauseBtn.style.cursor = pauseBtn.disabled ? 'not-allowed' : 'pointer';
+                    resumeBtn.style.opacity = resumeBtn.disabled ? '0.5' : '1';
+                    resumeBtn.style.cursor = resumeBtn.disabled ? 'not-allowed' : 'pointer';
+                }
                 
                 // Update schedule list
                 const scheduleList = document.getElementById('schedule-list');
@@ -413,7 +500,7 @@
             const enabled = checkbox.checked;
             
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/config`, {
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/config`), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -438,7 +525,7 @@
         
         async function loadLogs() {
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/logs?limit=20`);
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/logs?limit=20`));
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -498,7 +585,9 @@
         
         async function pauseScheduler() {
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/pause`, { method: 'POST' });
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/pause`), { 
+                    method: 'POST'
+                });
                 const data = await response.json();
                 showSuccess(data.message || 'Scheduler paused successfully');
                 loadStatus();
@@ -509,7 +598,9 @@
         
         async function resumeScheduler() {
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/resume`, { method: 'POST' });
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/resume`), { 
+                    method: 'POST'
+                });
                 const data = await response.json();
                 showSuccess(data.message || 'Scheduler resumed successfully');
                 loadStatus();
@@ -526,7 +617,9 @@
         
         async function triggerScheduler() {
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/trigger`, { method: 'POST' });
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/trigger`), { 
+                    method: 'POST'
+                });
                 const data = await response.json();
                 showSuccess(data.message || 'Manual refresh triggered');
                 setTimeout(() => refreshAll(), 2000); // Refresh logs after 2 seconds
@@ -546,7 +639,9 @@
             }
             
             try {
-                const response = await fetch(`${API_BASE}/api/scheduler/test?seconds=${secondsNum}`, { method: 'POST' });
+                const response = await fetch(addTokenToURL(`${API_BASE}/api/scheduler/test?seconds=${secondsNum}`), { 
+                    method: 'POST'
+                });
                 const data = await response.json();
                 if (response.ok) {
                     showSuccess(`Test job scheduled! ${data.message}. It will run automatically in ${secondsNum} seconds.`);
@@ -565,7 +660,7 @@
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
                 
-                const response = await fetch(`${API_BASE}/refresh-brief-dev`, {
+                const response = await fetch(addTokenToURL(`${API_BASE}/refresh-brief-dev`), {
                     method: 'POST',
                     signal: controller.signal
                 });
@@ -591,7 +686,7 @@
         async function refreshBriefUIDev() {
             try {
                 showSuccess('Loading saved summary from database...');
-                const response = await fetch(`${API_BASE}/refresh-brief-ui-dev`, {
+                const response = await fetch(addTokenToURL(`${API_BASE}/refresh-brief-ui-dev`), {
                     method: 'POST'
                 });
                 

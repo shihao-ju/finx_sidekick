@@ -78,3 +78,25 @@ def is_scheduler_enabled() -> bool:
     scheduler_config = get_scheduler_config()
     return scheduler_config.get("enabled", True)
 
+
+def save_scheduler_config(updates: Dict):
+    """
+    Save scheduler configuration updates to config.json.
+    
+    Args:
+        updates: Dictionary of scheduler config keys to update (e.g., {"paused": True})
+    """
+    config = load_config()
+    
+    if "scheduler" not in config:
+        config["scheduler"] = {}
+    
+    # Update scheduler config
+    config["scheduler"].update(updates)
+    
+    # Save to file
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2)
+    except IOError as e:
+        print(f"[WARNING] Failed to save config.json: {e}")

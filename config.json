@@ -26,6 +26,7 @@
     "retry": {
       "max_attempts": 3,
       "backoff_seconds": 60
-    }
+    },
+    "paused": true
   }
 }
