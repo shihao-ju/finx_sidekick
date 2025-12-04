@@ -6,7 +6,8 @@ import json
 import sys
 import asyncio
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -220,6 +221,153 @@ def fetch_user_info(handle: str) -> Optional[Dict]:
         print(f"Error fetching user info for {handle}: {e}", file=sys.stderr, flush=True)
     
     return None
+
+
+def fetch_tweets_advanced_search(handle: str, since_timestamp_utc: Optional[str] = None) -> List[Dict]:
+    """
+    Fetch tweets using Advanced Search API with timestamp-based queries.
+    This is more efficient for sparse accounts as it only fetches tweets in the time window.
+    
+    Args:
+        handle: Twitter handle (without @)
+        since_timestamp_utc: ISO format UTC timestamp (e.g., "2025-12-02T14:00:00Z")
+    
+    Returns:
+        List of tweet dictionaries
+    """
+    import sys
+    print(f"[DEBUG] fetch_tweets_advanced_search called for handle: {handle}, since_timestamp: {since_timestamp_utc}", file=sys.stderr, flush=True)
+    
+    if not TWITTER_API_KEY:
+        raise HTTPException(status_code=500, detail="Twitter API key not configured")
+    
+    # Format timestamps for Advanced Search API
+    # Format: YYYY-MM-DD_HH:MM:SS_UTC
+    if since_timestamp_utc:
+        # Parse ISO format and convert to Advanced Search format
+        try:
+            dt = datetime.fromisoformat(since_timestamp_utc.replace('Z', '+00:00'))
+            since_str = dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
+        except Exception as e:
+            print(f"[ERROR] Failed to parse since_timestamp: {e}", file=sys.stderr, flush=True)
+            return []
+    else:
+        # Default: last hour
+        dt = datetime.now(pytz.UTC) - timedelta(hours=1)
+        since_str = dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
+    
+    # Current time (use API server time, not local clock)
+    until_dt = datetime.now(pytz.UTC)
+    until_str = until_dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
+    
+    # Construct query: from:handle since:timestamp until:timestamp include:nativeretweets
+    query = f"from:{handle.lstrip('@')} since:{since_str} until:{until_str} include:nativeretweets"
+    
+    # API endpoint for Advanced Search
+    url = f"{TWITTER_API_BASE}/twitter/tweet/advanced_search"
+    headers = {
+        "X-API-Key": TWITTER_API_KEY  # Note: Advanced Search uses X-API-Key, not x-api-key
+    }
+    
+    params = {
+        "query": query,
+        "queryType": "Latest"
+    }
+    
+    all_tweets = []
+    next_cursor = None
+    
+    try:
+        with httpx.Client() as client:
+            while True:
+                if next_cursor:
+                    params["cursor"] = next_cursor
+                else:
+                    params.pop("cursor", None)
+                
+                response = client.get(url, headers=headers, params=params, timeout=30.0)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Check response status
+                if data.get("status") == "error":
+                    error_msg = data.get("msg", data.get("message", "Unknown error"))
+                    print(f"[ERROR] Advanced Search API error for {handle}: {error_msg}", file=sys.stderr, flush=True)
+                    break
+                
+                # Extract tweets
+                tweets = data.get("tweets", [])
+                if tweets:
+                    all_tweets.extend(tweets)
+                    print(f"[DEBUG] Advanced Search fetched {len(tweets)} tweets for {handle} (total: {len(all_tweets)})", file=sys.stderr, flush=True)
+                
+                # Check pagination
+                if not data.get("has_next_page", False) or not data.get("next_cursor", ""):
+                    break
+                
+                next_cursor = data.get("next_cursor", "")
+                
+    except Exception as e:
+        print(f"[ERROR] Advanced Search API error for {handle}: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return []
+    
+    print(f"[DEBUG] Advanced Search returned {len(all_tweets)} total tweets for {handle}", file=sys.stderr, flush=True)
+    return all_tweets
+
+
+def fetch_tweets_hybrid(handle: str, since_id: Optional[str] = None, 
+                       last_fetch_timestamp_utc: Optional[str] = None) -> List[Dict]:
+    """
+    Hybrid fetch: Uses timestamp-based Advanced Search as primary method,
+    falls back to since_id-based fetch if Advanced Search fails.
+    
+    Args:
+        handle: Twitter handle
+        since_id: Tweet ID for fallback method
+        last_fetch_timestamp_utc: UTC timestamp for primary method
+    
+    Returns:
+        List of tweet dictionaries
+    """
+    import sys
+    
+    # Primary: Try Advanced Search with timestamp
+    tweets = []
+    if last_fetch_timestamp_utc:
+        try:
+            print(f"[DEBUG] Attempting Advanced Search (primary) for {handle} since {last_fetch_timestamp_utc}", file=sys.stderr, flush=True)
+            tweets = fetch_tweets_advanced_search(handle, last_fetch_timestamp_utc)
+            
+            if tweets:
+                print(f"[DEBUG] Advanced Search succeeded: {len(tweets)} tweets", file=sys.stderr, flush=True)
+                return tweets
+            else:
+                print(f"[DEBUG] Advanced Search returned no tweets, trying fallback", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"[WARNING] Advanced Search failed for {handle}: {e}, trying fallback", file=sys.stderr, flush=True)
+    
+    # Fallback: Use since_id method
+    if since_id:
+        try:
+            print(f"[DEBUG] Using since_id fallback for {handle} with since_id: {since_id}", file=sys.stderr, flush=True)
+            tweets = fetch_tweets(handle, since_id)
+            print(f"[DEBUG] Fallback succeeded: {len(tweets)} tweets", file=sys.stderr, flush=True)
+            return tweets
+        except Exception as e:
+            print(f"[ERROR] Fallback also failed for {handle}: {e}", file=sys.stderr, flush=True)
+            return []
+    else:
+        # No since_id, try Advanced Search with default (last hour)
+        try:
+            print(f"[DEBUG] No since_id, trying Advanced Search with default time window", file=sys.stderr, flush=True)
+            tweets = fetch_tweets_advanced_search(handle, None)
+            return tweets
+        except Exception as e:
+            print(f"[ERROR] Advanced Search with default failed: {e}", file=sys.stderr, flush=True)
+            # Last resort: fetch all tweets
+            return fetch_tweets(handle, None)
 
 
 def fetch_tweets(handle: str, since_id: Optional[str] = None) -> List[Dict]:
@@ -906,17 +1054,14 @@ async def refresh_brief(response: Response):
         
         context = get_session_context(handle)
         last_tweet_id = context.get("last_tweet_id")
+        last_fetch_timestamp_utc = context.get("last_fetch_timestamp_utc")
         
-        # Check if we have any summaries in database (indicates this is not first fetch)
-        # If we have last_tweet_id, use it for filtering
-        since_id_to_use = None
-        if last_tweet_id:
-            since_id_to_use = last_tweet_id
-            log(f"[DEBUG] Fetching tweets for {handle} (has last_tweet_id), using since_id: {since_id_to_use}")
-        else:
-            log(f"[DEBUG] Fetching tweets for {handle} (FIRST FETCH - no last_tweet_id), ignoring since_id, fetching all tweets")
+        # Use hybrid fetch: timestamp primary, since_id fallback
+        log(f"[DEBUG] Fetching tweets for {handle}")
+        log(f"[DEBUG]   last_tweet_id: {last_tweet_id}")
+        log(f"[DEBUG]   last_fetch_timestamp_utc: {last_fetch_timestamp_utc}")
         
-        tweets = fetch_tweets(handle, since_id_to_use)
+        tweets = fetch_tweets_hybrid(handle, since_id=last_tweet_id, last_fetch_timestamp_utc=last_fetch_timestamp_utc)
         log(f"[DEBUG] fetch_tweets returned {len(tweets)} tweets for {handle}")
         
         # Extract and store username from tweets if we have tweets and don't have username stored
@@ -945,7 +1090,8 @@ async def refresh_brief(response: Response):
         all_accounts_data.append({
             "handle": handle,
             "fetch_timestamp": datetime.now().isoformat(),
-            "since_id_used_for_filtering": since_id_to_use,  # What was actually used to filter (None for first fetch)
+            "since_id_used_for_filtering": last_tweet_id,  # What was actually used to filter (None for first fetch)
+            "last_fetch_timestamp_utc": last_fetch_timestamp_utc,  # Timestamp used for Advanced Search
             "last_tweet_id_in_state": last_tweet_id,  # What was in state before fetch
             "last_tweet_id": new_last_tweet_id,  # New: latest tweet ID from fetched tweets (will be saved to state)
             "had_last_tweet_id": bool(last_tweet_id),
@@ -955,7 +1101,7 @@ async def refresh_brief(response: Response):
         
         log(f"[DEBUG] Collected {len(tweets)} tweets for {handle} (will save all accounts together)")
         log(f"[DEBUG]   had_last_tweet_id: {bool(last_tweet_id)}")
-        log(f"[DEBUG]   since_id_used_for_filtering: {since_id_to_use}")
+        log(f"[DEBUG]   last_fetch_timestamp_utc: {last_fetch_timestamp_utc}")
         log(f"[DEBUG]   last_tweet_id_in_state: {last_tweet_id}")
         log(f"[DEBUG]   new_last_tweet_id (latest fetched): {new_last_tweet_id}")
         
@@ -1236,11 +1382,17 @@ async def refresh_brief_dev(response: Response):
             import traceback
             traceback.print_exc(file=log_file)
     
-    # Update account tracking for all accounts with latest tweet IDs and summary ID
+    # Update account tracking for all accounts with latest tweet IDs, timestamp, and summary ID
     # Note: We don't store previous_summary anymore - it's fetched from summaries table
     if summary_id:
+        current_timestamp_utc = datetime.now(pytz.UTC).isoformat()
         for handle in accounts:
-            update_account_tracking(handle, last_tweet_id=account_last_tweet_ids.get(handle), last_summary_id=summary_id)
+            update_account_tracking(
+                handle,
+                last_tweet_id=account_last_tweet_ids.get(handle),
+                last_fetch_timestamp_utc=current_timestamp_utc,
+                last_summary_id=summary_id
+            )
     
     log(f"[DEBUG] Returning RefreshResponse with summary length: {len(cleaned_new_summary)}")
     log(f"[DEBUG] ========== /refresh-brief-dev COMPLETED ==========")
