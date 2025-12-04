@@ -272,6 +272,11 @@
             border-bottom: 1px solid #e0e0e0;
         }
 
+        .insight-header .insight-title {
+            flex: 1;
+            min-width: 0;
+        }
+
         .insight-header:hover {
             background: linear-gradient(135deg, #f0f0f0 0%, #f8f9fa 100%);
         }
@@ -373,6 +378,169 @@
         .source-tag::before {
             content: "🔗 ";
             margin-right: 4px;
+        }
+
+        /* Like and Thought Buttons */
+        .news-action-buttons {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 8px;
+        }
+
+        .news-action-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 18px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+        }
+
+        .news-action-btn:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            transform: scale(1.1);
+        }
+
+        .news-action-btn.liked {
+            color: #e74c3c;
+        }
+
+        .news-action-btn.has-thought {
+            color: #667eea;
+            position: relative;
+        }
+
+        .news-action-btn.has-thought::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 6px;
+            height: 6px;
+            background: #667eea;
+            border-radius: 50%;
+        }
+
+        /* Thought Modal */
+        .thought-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .thought-modal.active {
+            display: flex;
+        }
+
+        .thought-modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .thought-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .thought-modal-header h3 {
+            margin: 0;
+            color: #333;
+            font-size: 1.3em;
+        }
+
+        .thought-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+
+        .thought-modal-close:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .thought-modal-textarea {
+            flex: 1;
+            min-height: 150px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 16px;
+        }
+
+        .thought-modal-textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .thought-modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .thought-modal-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .thought-modal-btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .thought-modal-btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .thought-modal-btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .thought-modal-btn-secondary:hover {
+            background: #e0e0e0;
         }
 
         /* Load More Button */
@@ -906,6 +1074,22 @@
         </div>
     </div>
 
+    <!-- Thought Modal -->
+    <div id="thoughtModal" class="thought-modal">
+        <div class="thought-modal-content">
+            <div class="thought-modal-header">
+                <h3 id="thoughtModalTitle">Add Thought</h3>
+                <button class="thought-modal-close" onclick="closeThoughtModal()">×</button>
+            </div>
+            <textarea id="thoughtModalTextarea" class="thought-modal-textarea" 
+                      placeholder="Enter your thought about this news item..."></textarea>
+            <div class="thought-modal-actions">
+                <button class="thought-modal-btn thought-modal-btn-secondary" onclick="closeThoughtModal()">Cancel</button>
+                <button class="thought-modal-btn thought-modal-btn-primary" onclick="saveThought()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Use port 8002 for API calls
         const API_BASE = window.location.protocol + '//' + window.location.hostname + ':8002';
@@ -919,11 +1103,26 @@
         // Load accounts on page load
         async function loadAccounts() {
             try {
+                console.log('[DEBUG] Loading accounts from:', `${API_BASE}/manage-accounts`);
                 const response = await fetch(`${API_BASE}/manage-accounts`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 const data = await response.json();
-                displayAccounts(data.accounts);
+                console.log('[DEBUG] Received accounts data:', data);
+                if (data && data.accounts) {
+                    displayAccounts(data.accounts);
+                } else {
+                    console.error('[ERROR] Invalid response format:', data);
+                    displayAccounts([]);
+                }
             } catch (error) {
-                console.error('Error loading accounts:', error);
+                console.error('[ERROR] Error loading accounts:', error);
+                // Show error to user
+                const list = document.getElementById('accountsList');
+                if (list) {
+                    list.innerHTML = `<li style="color: #c33;">Error loading accounts: ${error.message}</li>`;
+                }
             }
         }
 
@@ -1394,7 +1593,6 @@
                         <div class="insight-card">
                             <div class="insight-header" onclick="toggleInsight('${uniqueId}')">
                                 <div class="insight-title">${titleHtml}</div>
-                                <div class="insight-toggle">▼</div>
                             </div>
                             <div class="insight-content" id="${uniqueId}">
                                 ${contentHtml || '<p style="color: #999; font-style: italic;">No additional details available.</p>'}
@@ -1551,17 +1749,31 @@
                     let tabsHtml = '<div class="summary-tabs">';
                     tabsHtml += '<button class="summary-tab active" onclick="switchTab(\'news\'); return false;">📰 News</button>';
                     tabsHtml += '<button class="summary-tab" onclick="switchTab(\'trades\'); return false;">💰 Trades</button>';
+                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'liked\'); return false;">❤️ Liked</button>';
+                    tabsHtml += '<button class="summary-tab" onclick="switchTab(\'thoughts\'); return false;">💭 Thoughts</button>';
                     tabsHtml += '</div>';
                     
                     let contentHtml = '<div class="tab-content active" id="tab-news">';
-                    contentHtml += renderItemsList(newsItems, 'news');
+                    contentHtml += await renderItemsList(newsItems, 'news');
                     contentHtml += '</div>';
                     
                     contentHtml += '<div class="tab-content" id="tab-trades">';
-                    contentHtml += renderItemsList(tradesItems, 'trades');
+                    contentHtml += await renderItemsList(tradesItems, 'trades');
+                    contentHtml += '</div>';
+                    
+                    contentHtml += '<div class="tab-content" id="tab-liked">';
+                    contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading liked news...</p></div>';
+                    contentHtml += '</div>';
+                    
+                    contentHtml += '<div class="tab-content" id="tab-thoughts">';
+                    contentHtml += '<div class="summary-content"><p style="color: #999; font-style: italic;">Loading thoughts...</p></div>';
                     contentHtml += '</div>';
                     
                     display.innerHTML = tabsHtml + contentHtml;
+                    
+                    // Load liked news and thoughts in background
+                    loadLikedNews().catch(err => console.error('Error loading liked news:', err));
+                    loadThoughts().catch(err => console.error('Error loading thoughts:', err));
                 } else {
                     // Append to existing lists
                     const newsTab = document.getElementById('tab-news');
@@ -1570,14 +1782,14 @@
                     if (newsTab && newsItems.length > 0) {
                         const newsList = newsTab.querySelector('.summary-content');
                         if (newsList) {
-                            newsList.innerHTML += renderItemsList(newsItems, 'news', true);
+                            newsList.innerHTML += await renderItemsList(newsItems, 'news', true);
                         }
                     }
                     
                     if (tradesTab && tradesItems.length > 0) {
                         const tradesList = tradesTab.querySelector('.summary-content');
                         if (tradesList) {
-                            tradesList.innerHTML += renderItemsList(tradesItems, 'trades', true);
+                            tradesList.innerHTML += await renderItemsList(tradesItems, 'trades', true);
                         }
                     }
                 }
@@ -1644,18 +1856,77 @@
             }
         }
         
+        // Generate news hash (matches backend implementation)
+        async function generateNewsHash(title, content, timestamp) {
+            const combined = `${title}|${content}|${timestamp}`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(combined);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Escape HTML for use in attributes
+        function escapeHtmlForAttr(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // Store liked status and thoughts in memory for quick access
+        let likedNewsHashes = new Set();
+        let newsThoughts = new Map();
+
         // Render a list of items (news or trades)
-        function renderItemsList(items, type, htmlOnly = false) {
+        async function renderItemsList(items, type, htmlOnly = false) {
             if (items.length === 0) {
                 return htmlOnly ? '' : '<div class="summary-content"><p style="color: #999; font-style: italic;">No items available.</p></div>';
             }
             
+            // Generate hashes for all items and check liked status
+            const hashPromises = items.map(item => 
+                generateNewsHash(item.title || '', item.content || '', item.timestamp || '')
+            );
+            const hashes = await Promise.all(hashPromises);
+            
+            // Check liked status for all items
+            if (hashes.length > 0) {
+                try {
+                    const response = await fetch(`${API_BASE}/api/news/liked-status?news_hashes=${hashes.join(',')}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        likedNewsHashes = new Set(data.liked_hashes || []);
+                    }
+                } catch (error) {
+                    console.error('Error checking liked status:', error);
+                }
+                
+                // Load thoughts for all items
+                for (let i = 0; i < hashes.length; i++) {
+                    try {
+                        const thoughtResponse = await fetch(`${API_BASE}/api/news/thought/${hashes[i]}`);
+                        if (thoughtResponse.ok) {
+                            const thoughtData = await thoughtResponse.json();
+                            if (thoughtData.thought) {
+                                newsThoughts.set(hashes[i], thoughtData.thought);
+                            }
+                        }
+                    } catch (error) {
+                        // Ignore errors for individual thoughts
+                    }
+                }
+            }
+            
             let html = htmlOnly ? '' : '<div class="summary-content">';
             
-            items.forEach((item, index) => {
+            for (let index = 0; index < items.length; index++) {
+                const item = items[index];
                 const uniqueId = `${type}-item-${currentOffset + index}`;
                 const relativeTime = formatTimestamp(item.timestamp);
                 const absoluteTime = formatAbsoluteTimestamp(item.timestamp);
+                const newsHash = hashes[index];
+                const isLiked = likedNewsHashes.has(newsHash);
+                const hasThought = newsThoughts.has(newsHash);
                 
                 // Process markdown content
                 let contentHtml = processMarkdownForItems(item.content || '', false);
@@ -1673,13 +1944,38 @@
                 // Process title (ensure tickers are bolded)
                 let titleHtml = processMarkdownForItems(item.title || '', false);
                 
+                // Escape HTML for onclick attributes
+                const escapedTitle = (item.title || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const escapedContent = (item.content || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
                 html += `
                     <div class="insight-card">
                         <div class="insight-header" onclick="toggleInsight('${uniqueId}')">
                             <div class="insight-title">${titleHtml}</div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
                                 <span class="insight-timestamp" onclick="event.stopPropagation(); showAbsoluteTime('${uniqueId}', '${item.timestamp}')" title="Click for absolute time">${relativeTime}</span>
-                                <div class="insight-toggle">▼</div>
+                                <div class="news-action-buttons" onclick="event.stopPropagation();">
+                                    <button class="news-action-btn like-btn ${isLiked ? 'liked' : ''}" 
+                                            data-news-hash="${newsHash}"
+                                            data-title="${escapeHtmlForAttr(item.title || '')}"
+                                            data-content="${escapeHtmlForAttr(item.content || '')}"
+                                            data-timestamp="${item.timestamp}"
+                                            data-source-tags="${escapeHtmlForAttr(JSON.stringify(item.source_tags || []))}"
+                                            data-tweet-ids="${escapeHtmlForAttr(JSON.stringify(item.tweet_ids || []))}"
+                                            title="${isLiked ? 'Unlike' : 'Like'}">
+                                        ${isLiked ? '❤️' : '🤍'}
+                                    </button>
+                                    <button class="news-action-btn thought-btn ${hasThought ? 'has-thought' : ''}" 
+                                            data-news-hash="${newsHash}"
+                                            data-title="${escapeHtmlForAttr(item.title || '')}"
+                                            data-content="${escapeHtmlForAttr(item.content || '')}"
+                                            data-timestamp="${item.timestamp}"
+                                            data-source-tags="${escapeHtmlForAttr(JSON.stringify(item.source_tags || []))}"
+                                            data-tweet-ids="${escapeHtmlForAttr(JSON.stringify(item.tweet_ids || []))}"
+                                            title="${hasThought ? 'Edit thought' : 'Add thought'}">
+                                        💭
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div class="insight-content" id="${uniqueId}">
@@ -1688,7 +1984,7 @@
                         </div>
                     </div>
                 `;
-            });
+            }
             
             html += htmlOnly ? '' : '</div>';
             return html;
@@ -1762,8 +2058,157 @@
             if (contentElement) {
                 contentElement.classList.add('active');
                 console.log(`[DEBUG] Tab ${tabName} activated, content length:`, contentElement.innerHTML.length);
+                
+                // Load data if switching to specific tabs
+                if (tabName === 'liked') {
+                    loadLikedNews();
+                } else if (tabName === 'thoughts') {
+                    loadThoughts();
+                }
             } else {
                 console.error(`[ERROR] Tab content element tab-${tabName} not found!`);
+            }
+        }
+
+        // Load liked news items
+        async function loadLikedNews(offset = 0) {
+            const likedTab = document.getElementById('tab-liked');
+            if (!likedTab) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/news/likes?limit=20&offset=${offset}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const likes = data.likes || [];
+                const total = data.total || 0;
+                
+                if (likes.length === 0) {
+                    likedTab.innerHTML = '<div class="summary-content"><p style="color: #999; font-style: italic;">No liked news items yet.</p></div>';
+                    return;
+                }
+                
+                // Convert liked items to NewsTradeItem format for rendering
+                const likedItems = likes.map(like => ({
+                    title: like.title,
+                    content: like.content,
+                    timestamp: like.timestamp,
+                    source_tags: like.source_tags || [],
+                    tweet_ids: like.tweet_ids || []
+                }));
+                
+                // Render liked items
+                const html = await renderItemsList(likedItems, 'liked');
+                likedTab.innerHTML = html;
+                
+                // Add load more button if needed
+                if (offset + 20 < total) {
+                    const loadMoreBtn = document.createElement('button');
+                    loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.textContent = 'Load More';
+                    loadMoreBtn.onclick = () => loadLikedNews(offset + 20);
+                    likedTab.appendChild(loadMoreBtn);
+                }
+            } catch (error) {
+                console.error('Error loading liked news:', error);
+                likedTab.innerHTML = '<div class="summary-content"><p style="color: #c33;">Error loading liked news: ' + error.message + '</p></div>';
+            }
+        }
+
+        // Load thoughts/comments
+        async function loadThoughts(offset = 0) {
+            const thoughtsTab = document.getElementById('tab-thoughts');
+            if (!thoughtsTab) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/news/thoughts?limit=20&offset=${offset}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const thoughts = data.thoughts || [];
+                const total = data.total || 0;
+                
+                console.log('[DEBUG] Loaded thoughts:', thoughts.length, 'Total:', total);
+                thoughts.forEach((t, i) => {
+                    console.log(`[DEBUG] Thought ${i}: hash=${t.news_hash.substring(0, 16)}..., title="${t.title}", hasContent=${!!t.content}`);
+                });
+                
+                if (thoughts.length === 0) {
+                    thoughtsTab.innerHTML = '<div class="summary-content"><p style="color: #999; font-style: italic;">No thoughts/comments yet. Click the 💭 button on any news item to add a thought.</p></div>';
+                    return;
+                }
+                
+                // Render thoughts with their associated news items
+                let html = '<div class="summary-content">';
+                
+                for (const thoughtItem of thoughts) {
+                    const newsHash = thoughtItem.news_hash;
+                    const relativeTime = formatTimestamp(thoughtItem.timestamp);
+                    const thoughtTime = formatTimestamp(thoughtItem.updated_at);
+                    
+                    console.log(`[DEBUG] Rendering thought: title="${thoughtItem.title}", content length=${thoughtItem.content ? thoughtItem.content.length : 0}`);
+                    
+                    // Process markdown content
+                    let contentHtml = processMarkdownForItems(thoughtItem.content || '', false);
+                    let titleHtml = processMarkdownForItems(thoughtItem.title || 'Unknown', false);
+                    
+                    // Generate source tags HTML
+                    let sourceTagsHtml = '';
+                    if (thoughtItem.source_tags && thoughtItem.source_tags.length > 0) {
+                        sourceTagsHtml = '<div class="source-tags">';
+                        thoughtItem.source_tags.forEach(tag => {
+                            sourceTagsHtml += `<a href="${tag.url}" target="_blank" rel="noopener noreferrer" class="source-tag">@${tag.handle}</a>`;
+                        });
+                        sourceTagsHtml += '</div>';
+                    }
+                    
+                    html += `
+                        <div class="insight-card">
+                            <div class="insight-header" onclick="toggleInsight('thought-${thoughtItem.id}')">
+                                <div class="insight-title">${titleHtml}</div>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <span class="insight-timestamp" title="News: ${relativeTime}">${relativeTime}</span>
+                                    <div class="news-action-buttons" onclick="event.stopPropagation();">
+                                        <button class="news-action-btn thought-btn has-thought" 
+                                                data-news-hash="${newsHash}"
+                                                data-title="${escapeHtmlForAttr(thoughtItem.title || '')}"
+                                                title="Edit thought">
+                                            💭
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="insight-content" id="thought-${thoughtItem.id}">
+                                <div style="background: #f0f7ff; border-left: 3px solid #667eea; padding: 16px; margin-bottom: 16px; border-radius: 4px;">
+                                    <div style="font-weight: 600; color: #667eea; margin-bottom: 8px; font-size: 0.9em;">💭 Your Thought:</div>
+                                    <div style="color: #333; white-space: pre-wrap;">${escapeHtml(thoughtItem.thought)}</div>
+                                    <div style="font-size: 0.85em; color: #999; margin-top: 8px;">Added: ${thoughtTime}</div>
+                                </div>
+                                ${contentHtml || '<p style="color: #999; font-style: italic;">No additional details available.</p>'}
+                                ${sourceTagsHtml || ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                thoughtsTab.innerHTML = html;
+                
+                // Add load more button if needed
+                if (offset + 20 < total) {
+                    const loadMoreBtn = document.createElement('button');
+                    loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.textContent = 'Load More';
+                    loadMoreBtn.onclick = () => loadThoughts(offset + 20);
+                    thoughtsTab.appendChild(loadMoreBtn);
+                }
+            } catch (error) {
+                console.error('Error loading thoughts:', error);
+                thoughtsTab.innerHTML = '<div class="summary-content"><p style="color: #c33;">Error loading thoughts: ' + error.message + '</p></div>';
             }
         }
 
@@ -1774,18 +2219,12 @@
                 return;
             }
             
-            // Find the toggle button in the header (parent of content's sibling)
-            const header = content.previousElementSibling;
-            const toggle = header ? header.querySelector('.insight-toggle') : null;
-            
             console.log(`[DEBUG] Toggling insight ${insightId}, content length:`, content.innerHTML.length);
             
             if (content.classList.contains('expanded')) {
                 content.classList.remove('expanded');
-                if (toggle) toggle.classList.remove('expanded');
             } else {
                 content.classList.add('expanded');
-                if (toggle) toggle.classList.add('expanded');
             }
         }
 
@@ -2040,8 +2479,310 @@
             }
         });
 
-        // Load accounts on page load
-        loadAccounts();
+        // Toggle like status
+        async function toggleLike(newsHash, title, content, timestamp, sourceTags, tweetIds) {
+            console.log('toggleLike called with:', { newsHash, title: title.substring(0, 50), isLiked: likedNewsHashes.has(newsHash) });
+            const isLiked = likedNewsHashes.has(newsHash);
+            
+            try {
+                if (isLiked) {
+                    // Unlike
+                    const response = await fetch(`${API_BASE}/api/news/like/${newsHash}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        likedNewsHashes.delete(newsHash);
+                        updateLikeButton(newsHash, false);
+                    } else {
+                        const error = await response.json();
+                        showError('Failed to unlike: ' + (error.detail || 'Unknown error'));
+                    }
+                } else {
+                    // Like
+                    const response = await fetch(`${API_BASE}/api/news/like`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            news_hash: newsHash,
+                            title: title,
+                            content: content,
+                            timestamp: timestamp,
+                            source_tags: sourceTags,
+                            tweet_ids: tweetIds
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        likedNewsHashes.add(newsHash);
+                        updateLikeButton(newsHash, true);
+                    } else {
+                        const error = await response.json();
+                        showError('Failed to like: ' + (error.detail || 'Unknown error'));
+                    }
+                }
+            } catch (error) {
+                console.error('Error toggling like:', error);
+                showError('Error toggling like: ' + error.message);
+            }
+        }
+
+        // Update like button visual state
+        function updateLikeButton(newsHash, isLiked) {
+            const buttons = document.querySelectorAll(`button.like-btn[data-news-hash="${newsHash}"]`);
+            buttons.forEach(btn => {
+                if (isLiked) {
+                    btn.classList.add('liked');
+                    btn.innerHTML = '❤️';
+                    btn.title = 'Unlike';
+                } else {
+                    btn.classList.remove('liked');
+                    btn.innerHTML = '🤍';
+                    btn.title = 'Like';
+                }
+            });
+        }
+
+        // Open thought modal
+        async function openThoughtModal(newsHash, title) {
+            console.log('openThoughtModal called with:', { newsHash, title });
+            const modal = document.getElementById('thoughtModal');
+            const modalTitle = document.getElementById('thoughtModalTitle');
+            const modalTextarea = document.getElementById('thoughtModalTextarea');
+            
+            if (!modal) {
+                console.error('Thought modal element not found');
+                return;
+            }
+            if (!modalTitle) {
+                console.error('Thought modal title element not found');
+                return;
+            }
+            if (!modalTextarea) {
+                console.error('Thought modal textarea element not found');
+                return;
+            }
+            
+            // Store title in modal dataset for saveThought to use
+            modal.dataset.newsTitle = title || '';
+            modalTitle.textContent = title || 'Add Thought';
+            modalTextarea.value = newsThoughts.get(newsHash) || '';
+            modal.dataset.newsHash = newsHash;
+            modal.classList.add('active');
+            modalTextarea.focus();
+            console.log('Modal opened successfully');
+        }
+
+        // Event delegation for like and thought buttons
+        // Use document-level delegation to catch dynamically created buttons
+        document.addEventListener('click', function(event) {
+            // Handle like button clicks
+            const likeBtn = event.target.closest('.like-btn');
+            if (likeBtn) {
+                event.preventDefault();
+                event.stopPropagation();
+                const newsHash = likeBtn.dataset.newsHash;
+                const title = likeBtn.dataset.title || '';
+                const content = likeBtn.dataset.content || '';
+                const timestamp = likeBtn.dataset.timestamp || '';
+                let sourceTags = [];
+                let tweetIds = [];
+                
+                try {
+                    sourceTags = JSON.parse(likeBtn.dataset.sourceTags || '[]');
+                    tweetIds = JSON.parse(likeBtn.dataset.tweetIds || '[]');
+                } catch (e) {
+                    console.error('Error parsing source tags or tweet IDs:', e);
+                }
+                
+                console.log('Like button clicked for hash:', newsHash);
+                toggleLike(newsHash, title, content, timestamp, sourceTags, tweetIds);
+                return false;
+            }
+            
+            // Handle thought button clicks
+            const thoughtBtn = event.target.closest('.thought-btn');
+            if (thoughtBtn) {
+                event.preventDefault();
+                event.stopPropagation();
+                const newsHash = thoughtBtn.dataset.newsHash;
+                const title = thoughtBtn.dataset.title || '';
+                console.log('Thought button clicked for hash:', newsHash);
+                openThoughtModal(newsHash, title);
+                return false;
+            }
+        }, true); // Use capture phase to catch events before they bubble
+
+        // Close thought modal
+        function closeThoughtModal() {
+            const modal = document.getElementById('thoughtModal');
+            modal.classList.remove('active');
+            modal.dataset.newsHash = '';
+        }
+
+        // Save thought
+        async function saveThought() {
+            const modal = document.getElementById('thoughtModal');
+            const newsHash = modal.dataset.newsHash;
+            const textarea = document.getElementById('thoughtModalTextarea');
+            const thought = textarea.value.trim();
+            
+            if (!newsHash) {
+                showError('No news item selected');
+                return;
+            }
+            
+            // Get news item data from the thought button's data attributes
+            const thoughtBtn = document.querySelector(`.thought-btn[data-news-hash="${newsHash}"]`);
+            let title = modal.dataset.newsTitle || '';
+            let content = '';
+            let timestamp = '';
+            let sourceTags = [];
+            let tweetIds = [];
+            
+            console.log('[DEBUG] saveThought - Looking for button with hash:', newsHash);
+            console.log('[DEBUG] saveThought - Found thoughtBtn:', !!thoughtBtn);
+            
+            if (thoughtBtn) {
+                // Get data from thought button's data attributes
+                title = thoughtBtn.dataset.title || title;
+                content = thoughtBtn.dataset.content || '';
+                timestamp = thoughtBtn.dataset.timestamp || '';
+                console.log('[DEBUG] saveThought - From thoughtBtn:', {
+                    title: title.substring(0, 50),
+                    contentLength: content.length,
+                    timestamp: timestamp ? timestamp.substring(0, 30) : 'none'
+                });
+                try {
+                    sourceTags = JSON.parse(thoughtBtn.dataset.sourceTags || '[]');
+                    tweetIds = JSON.parse(thoughtBtn.dataset.tweetIds || '[]');
+                } catch (e) {
+                    console.error('Error parsing source tags or tweet IDs:', e);
+                }
+            }
+            
+            // Fallback: try to get from like button if thought button didn't have data
+            if (!title || !content || !timestamp) {
+                const likeBtn = document.querySelector(`.like-btn[data-news-hash="${newsHash}"]`);
+                console.log('[DEBUG] saveThought - Found likeBtn (fallback):', !!likeBtn);
+                if (likeBtn) {
+                    title = likeBtn.dataset.title || title;
+                    content = likeBtn.dataset.content || content;
+                    timestamp = likeBtn.dataset.timestamp || timestamp;
+                    console.log('[DEBUG] saveThought - From likeBtn:', {
+                        title: title.substring(0, 50),
+                        contentLength: content.length,
+                        timestamp: timestamp ? timestamp.substring(0, 30) : 'none'
+                    });
+                    try {
+                        if (!sourceTags.length) {
+                            sourceTags = JSON.parse(likeBtn.dataset.sourceTags || '[]');
+                        }
+                        if (!tweetIds.length) {
+                            tweetIds = JSON.parse(likeBtn.dataset.tweetIds || '[]');
+                        }
+                    } catch (e) {
+                        console.error('Error parsing source tags or tweet IDs:', e);
+                    }
+                }
+            }
+            
+            console.log('[DEBUG] saveThought - Final data before save:', {
+                title: title.substring(0, 50),
+                contentLength: content.length,
+                timestamp: timestamp ? timestamp.substring(0, 30) : 'none',
+                hasSourceTags: sourceTags.length > 0,
+                hasTweetIds: tweetIds.length > 0
+            });
+            
+            console.log('Saving thought with data:', {
+                newsHash,
+                thought: thought.substring(0, 50),
+                title: title.substring(0, 50),
+                content: content.substring(0, 50),
+                timestamp,
+                hasSourceTags: sourceTags.length > 0,
+                hasTweetIds: tweetIds.length > 0
+            });
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/news/thought`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        news_hash: newsHash,
+                        thought: thought,
+                        title: title,
+                        content: content,
+                        timestamp: timestamp,
+                        source_tags: sourceTags,
+                        tweet_ids: tweetIds
+                    })
+                });
+                
+                if (response.ok) {
+                    if (thought) {
+                        newsThoughts.set(newsHash, thought);
+                    } else {
+                        newsThoughts.delete(newsHash);
+                    }
+                    updateThoughtButton(newsHash, !!thought);
+                    closeThoughtModal();
+                    
+                    // Reload thoughts tab if it's currently visible
+                    const thoughtsTab = document.getElementById('tab-thoughts');
+                    if (thoughtsTab && thoughtsTab.classList.contains('active')) {
+                        loadThoughts();
+                    }
+                } else {
+                    const error = await response.json();
+                    showError('Failed to save thought: ' + (error.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                showError('Error saving thought: ' + error.message);
+            }
+        }
+
+        // Update thought button visual state
+        function updateThoughtButton(newsHash, hasThought) {
+            const buttons = document.querySelectorAll(`button[onclick*="openThoughtModal('${newsHash}'"]`);
+            buttons.forEach(btn => {
+                if (hasThought) {
+                    btn.classList.add('has-thought');
+                    btn.title = 'Edit thought';
+                } else {
+                    btn.classList.remove('has-thought');
+                    btn.title = 'Add thought';
+                }
+            });
+        }
+
+        // Close modal on outside click
+        document.addEventListener('click', function(event) {
+            const modal = document.getElementById('thoughtModal');
+            if (event.target === modal) {
+                closeThoughtModal();
+            }
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeThoughtModal();
+            }
+        });
+
+        // Load accounts on page load - wait for DOM to be ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadAccounts);
+        } else {
+            // DOM is already ready
+            loadAccounts();
+        }
     </script>
 </body>
 </html>

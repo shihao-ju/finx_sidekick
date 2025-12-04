@@ -201,6 +201,67 @@ class ChatResponse(BaseModel):
     answer: str
 
 
+class NewsLikeRequest(BaseModel):
+    news_hash: str
+    title: str
+    content: str
+    timestamp: str
+    source_tags: List[Dict]
+    tweet_ids: List[str]
+
+
+class NewsThoughtRequest(BaseModel):
+    news_hash: str
+    thought: str
+    title: Optional[str] = None
+    content: Optional[str] = None
+    timestamp: Optional[str] = None
+    source_tags: Optional[List[Dict]] = None
+    tweet_ids: Optional[List[str]] = None
+
+
+class NewsLikeItem(BaseModel):
+    id: int
+    news_hash: str
+    title: str
+    content: str
+    timestamp: str
+    liked_at: str
+    source_tags: List[Dict]
+    tweet_ids: List[str]
+
+
+class NewsLikesResponse(BaseModel):
+    likes: List[NewsLikeItem]
+    total: int
+
+
+class NewsThoughtResponse(BaseModel):
+    thought: Optional[str] = None
+
+
+class LikedStatusResponse(BaseModel):
+    liked_hashes: List[str]
+
+
+class NewsThoughtItem(BaseModel):
+    id: int
+    news_hash: str
+    thought: str
+    created_at: str
+    updated_at: str
+    title: str
+    content: str
+    timestamp: str
+    source_tags: List[Dict]
+    tweet_ids: List[str]
+
+
+class NewsThoughtsResponse(BaseModel):
+    thoughts: List[NewsThoughtItem]
+    total: int
+
+
 def fetch_user_info(handle: str) -> Optional[Dict]:
     """
     Fetch user profile information from twitterapi.io API.
@@ -1756,6 +1817,139 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
         total_news=len(all_news),
         total_trades=len(all_trades)
     )
+
+
+# ==================== News Likes and Thoughts API Endpoints ====================
+
+@app.post("/api/news/like")
+async def like_news(request: NewsLikeRequest):
+    """Like a news item."""
+    try:
+        from database import save_news_like
+        success = save_news_like(
+            news_hash=request.news_hash,
+            title=request.title,
+            content=request.content,
+            timestamp=request.timestamp,
+            source_tags=request.source_tags,
+            tweet_ids=request.tweet_ids
+        )
+        if success:
+            return {"status": "success", "message": "News item liked"}
+        else:
+            return {"status": "already_liked", "message": "News item already liked"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/news/like/{news_hash}")
+async def unlike_news(news_hash: str):
+    """Unlike a news item."""
+    try:
+        from database import remove_news_like
+        success = remove_news_like(news_hash)
+        if success:
+            return {"status": "success", "message": "News item unliked"}
+        else:
+            raise HTTPException(status_code=404, detail="News item not found in likes")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news/likes", response_model=NewsLikesResponse)
+async def get_liked_news(limit: int = 10, offset: int = 0):
+    """Get paginated list of liked news items."""
+    try:
+        from database import get_news_likes, get_news_likes_count
+        likes = get_news_likes(limit=limit, offset=offset)
+        total = get_news_likes_count()
+        
+        return NewsLikesResponse(
+            likes=[NewsLikeItem(**like) for like in likes],
+            total=total
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/news/thought")
+async def save_news_thought(request: NewsThoughtRequest):
+    """Save or update a thought for a news item."""
+    try:
+        import sys
+        print(f"[DEBUG] Saving thought for hash: {request.news_hash}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] Title: {request.title[:50] if request.title else 'None'}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] Content length: {len(request.content) if request.content else 0}", file=sys.stderr, flush=True)
+        
+        from database import save_news_thought
+        success = save_news_thought(
+            news_hash=request.news_hash,
+            thought=request.thought,
+            title=request.title,
+            content=request.content,
+            timestamp=request.timestamp,
+            source_tags=request.source_tags,
+            tweet_ids=request.tweet_ids
+        )
+        if success:
+            print(f"[DEBUG] Thought saved successfully", file=sys.stderr, flush=True)
+            return {"status": "success", "message": "Thought saved"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save thought")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import sys
+        print(f"[ERROR] Error saving thought: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news/thought/{news_hash}", response_model=NewsThoughtResponse)
+async def get_news_thought(news_hash: str):
+    """Get thought for a specific news item."""
+    try:
+        from database import get_news_thought
+        thought = get_news_thought(news_hash)
+        return NewsThoughtResponse(thought=thought)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news/liked-status", response_model=LikedStatusResponse)
+async def get_liked_status(news_hashes: str):
+    """
+    Get which news items are liked.
+    
+    Args:
+        news_hashes: Comma-separated list of news hashes
+    """
+    try:
+        from database import get_liked_status
+        hash_list = [h.strip() for h in news_hashes.split(',') if h.strip()]
+        liked_hashes = get_liked_status(hash_list)
+        return LikedStatusResponse(liked_hashes=liked_hashes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news/thoughts", response_model=NewsThoughtsResponse)
+async def get_all_news_thoughts(limit: int = 20, offset: int = 0):
+    """Get paginated list of all thoughts with their associated news items."""
+    try:
+        from database import get_all_news_thoughts, get_news_thoughts_count
+        thoughts = get_all_news_thoughts(limit=limit, offset=offset)
+        total = get_news_thoughts_count()
+        
+        return NewsThoughtsResponse(
+            thoughts=[NewsThoughtItem(**thought) for thought in thoughts],
+            total=total
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Admin API Endpoints ====================
