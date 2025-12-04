@@ -1761,15 +1761,7 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
     def deduplicate_items(items: List[Dict]) -> List[Dict]:
         """Remove duplicate items using fuzzy title matching and tweet ID overlap"""
         # Sort by timestamp (newest first) so we keep newer versions
-        # Parse timestamps as datetime for reliable sorting
-        def parse_ts(ts_str: str) -> datetime:
-            try:
-                ts_str_clean = ts_str.replace('Z', '+00:00')
-                return datetime.fromisoformat(ts_str_clean)
-            except (ValueError, AttributeError):
-                return datetime.min
-        
-        items_sorted = sorted(items, key=lambda x: parse_ts(x.get("timestamp", "")), reverse=True)
+        items_sorted = sorted(items, key=lambda x: x.get("timestamp", ""), reverse=True)
         
         kept_items = []
         for item in items_sorted:
@@ -1812,19 +1804,9 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
     all_news = deduplicate_items(all_news)
     all_trades = deduplicate_items(all_trades)
     
-    # Sort by timestamp (newest first) - parse as datetime for reliable sorting
-    def parse_timestamp_for_sort(ts_str: str) -> datetime:
-        """Parse ISO timestamp string to datetime for reliable sorting."""
-        try:
-            # Handle various ISO formats
-            ts_str_clean = ts_str.replace('Z', '+00:00')
-            return datetime.fromisoformat(ts_str_clean)
-        except (ValueError, AttributeError):
-            # Fallback: return epoch if parsing fails
-            return datetime.min
-    
-    all_news.sort(key=lambda x: parse_timestamp_for_sort(x.get("timestamp", "")), reverse=True)
-    all_trades.sort(key=lambda x: parse_timestamp_for_sort(x.get("timestamp", "")), reverse=True)
+    # Sort by timestamp (newest first)
+    all_news.sort(key=lambda x: x["timestamp"], reverse=True)
+    all_trades.sort(key=lambda x: x["timestamp"], reverse=True)
     
     # Apply pagination
     if item_type == "news":
