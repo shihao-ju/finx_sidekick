@@ -56,7 +56,7 @@ app = FastAPI(title="Financial Signal Aggregator API")
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and run migration if needed."""
+    """Initialize database, run migration, and start scheduler."""
     init_database()
     
     # Run migration from state.json to database (one-time, idempotent)
@@ -68,6 +68,28 @@ async def startup_event():
         if migration_report["errors"]:
             print(f"[WARNING] Migration errors: {migration_report['errors']}", flush=True)
     except Exception as e:
+        print(f"[WARNING] Migration failed (non-critical): {e}", flush=True)
+    
+    # Start scheduler
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        scheduler_manager.start()
+    except Exception as e:
+        print(f"[ERROR] Failed to start scheduler: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop scheduler on shutdown."""
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        scheduler_manager.stop()
+    except Exception as e:
+        print(f"[ERROR] Error stopping scheduler: {e}", flush=True)
         print(f"[WARNING] Migration failed (non-critical): {e}", flush=True)
 
 # Enable CORS for frontend
@@ -263,6 +285,9 @@ def fetch_tweets_advanced_search(handle: str, since_timestamp_utc: Optional[str]
     # Construct query: from:handle since:timestamp until:timestamp include:nativeretweets
     query = f"from:{handle.lstrip('@')} since:{since_str} until:{until_str} include:nativeretweets"
     
+    print(f"[DEBUG] Advanced Search query: {query}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] Time window: {since_str} to {until_str} ({(until_dt - dt).total_seconds():.1f} seconds)", file=sys.stderr, flush=True)
+    
     # API endpoint for Advanced Search
     url = f"{TWITTER_API_BASE}/twitter/tweet/advanced_search"
     headers = {
@@ -344,11 +369,15 @@ def fetch_tweets_hybrid(handle: str, since_id: Optional[str] = None,
                 print(f"[DEBUG] Advanced Search succeeded: {len(tweets)} tweets", file=sys.stderr, flush=True)
                 return tweets
             else:
-                print(f"[DEBUG] Advanced Search returned no tweets, trying fallback", file=sys.stderr, flush=True)
+                # Advanced Search returned 0 tweets - this means no new tweets after the timestamp
+                # Trust this result and return empty list (don't fall back to since_id)
+                print(f"[DEBUG] Advanced Search returned 0 tweets - no new tweets after {last_fetch_timestamp_utc}", file=sys.stderr, flush=True)
+                return []
         except Exception as e:
+            # Only fall back if Advanced Search throws an error (not if it returns 0 results)
             print(f"[WARNING] Advanced Search failed for {handle}: {e}, trying fallback", file=sys.stderr, flush=True)
     
-    # Fallback: Use since_id method
+    # Fallback: Use since_id method (only if Advanced Search failed with an error, or no timestamp provided)
     if since_id:
         try:
             print(f"[DEBUG] Using since_id fallback for {handle} with since_id: {since_id}", file=sys.stderr, flush=True)
@@ -1013,13 +1042,14 @@ async def reset_state():
     clear_all_contexts()
     return {"message": "State reset successfully. All accounts will fetch tweets from the beginning."}
 
-@app.post("/refresh-brief", response_model=RefreshResponse)
-async def refresh_brief(response: Response):
-    # Prevent caching
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    """Core logic: Fetch new tweets, generate summary, update state."""
+async def refresh_brief_logic() -> Optional[Dict]:
+    """
+    Core refresh logic: Fetch new tweets, generate summary, update state.
+    This function can be called by both the API endpoint and the scheduler.
+    
+    Returns:
+        Dict with summary and metadata, or None if error/no tweets
+    """
     import sys
     # Also log to file for debugging
     log_file = open("refresh_brief.log", "a", encoding="utf-8")
@@ -1027,7 +1057,7 @@ async def refresh_brief(response: Response):
         print(msg, file=sys.stderr, flush=True)
         print(msg, file=log_file, flush=True)
     
-    log("[DEBUG] ========== /refresh-brief CALLED ==========")
+    log("[DEBUG] ========== refresh_brief_logic CALLED ==========")
     accounts = get_monitored_account_handles()
     log(f"[DEBUG] Monitored accounts: {accounts}")
     
@@ -1214,11 +1244,21 @@ async def refresh_brief(response: Response):
             import traceback
             traceback.print_exc(file=log_file)
     
-    # Update account tracking for all accounts with latest tweet IDs and summary ID
+    # Update account tracking for all accounts with latest tweet IDs, timestamp, and summary ID
     # Note: We don't store previous_summary anymore - it's fetched from summaries table
-    if summary_id:
-        for handle in accounts:
-            update_account_tracking(handle, last_tweet_id=account_last_tweet_ids.get(handle), last_summary_id=summary_id)
+    # IMPORTANT: Update timestamp and tweet IDs even if no summary was generated (as long as we fetched tweets)
+    # This ensures we don't re-fetch the same tweets on the next run
+    current_timestamp_utc = datetime.now(pytz.UTC).isoformat()
+    for handle in accounts:
+        update_params = {
+            "handle": handle,
+            "last_tweet_id": account_last_tweet_ids.get(handle),
+            "last_fetch_timestamp_utc": current_timestamp_utc
+        }
+        if summary_id:
+            update_params["last_summary_id"] = summary_id
+        log(f"[DEBUG] Updating account tracking for {handle}: last_tweet_id={update_params.get('last_tweet_id')}, timestamp={current_timestamp_utc}")
+        update_account_tracking(**update_params)
     
     log(f"[DEBUG] Returning RefreshResponse with summary length: {len(cleaned_new_summary)}")
     
@@ -1240,7 +1280,14 @@ async def refresh_brief(response: Response):
         log(f"[DEBUG] First 500 chars of summary being returned: {cleaned_new_summary[:500]}")
     
     log_file.close()
-    return RefreshResponse(summary=cleaned_new_summary)
+    
+    # Return result dict for scheduler use
+    return {
+        "summary": cleaned_new_summary,
+        "tweet_count": len(all_new_tweets),
+        "summary_id": summary_id,
+        "accounts": accounts
+    }
 
 
 @app.post("/refresh-brief-dev", response_model=RefreshResponse)
@@ -1615,6 +1662,165 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
         total_news=len(all_news),
         total_trades=len(all_trades)
     )
+
+
+# ==================== Admin API Endpoints ====================
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status():
+    """Get scheduler status and configuration."""
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        status = scheduler_manager.get_status()
+        return status
+    except Exception as e:
+        return {"error": str(e), "enabled": False, "running": False}
+
+
+@app.post("/api/scheduler/pause")
+async def pause_scheduler():
+    """Pause the scheduler."""
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        scheduler_manager.pause()
+        return {"status": "paused", "message": "Scheduler paused successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scheduler/resume")
+async def resume_scheduler():
+    """Resume the scheduler."""
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        scheduler_manager.resume()
+        return {"status": "resumed", "message": "Scheduler resumed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scheduler/trigger")
+async def trigger_scheduler():
+    """Manually trigger a refresh now."""
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        scheduler_manager.trigger_now()
+        return {"status": "triggered", "message": "Manual refresh triggered"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scheduler/test")
+async def test_scheduler(seconds: int = 60):
+    """
+    Schedule a test job that will run automatically in X seconds.
+    Useful for testing scheduler functionality without waiting for the next scheduled time.
+    
+    Args:
+        seconds: Number of seconds from now to schedule the test job (default: 60, min: 10)
+    
+    Returns:
+        Dict with job info and scheduled time
+    """
+    if seconds < 10:
+        raise HTTPException(status_code=400, detail="Minimum delay is 10 seconds for safety")
+    
+    if seconds > 3600:
+        raise HTTPException(status_code=400, detail="Maximum delay is 3600 seconds (1 hour)")
+    
+    try:
+        from scheduler import get_scheduler_manager
+        scheduler_manager = get_scheduler_manager()
+        result = scheduler_manager.schedule_test_job(seconds_from_now=seconds)
+        return {
+            "status": "scheduled",
+            **result
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/scheduler/logs")
+async def get_scheduler_logs(limit: int = 50, offset: int = 0):
+    """Get scheduler logs."""
+    try:
+        from database import get_scheduler_logs
+        logs = get_scheduler_logs(limit=limit, offset=offset)
+        return {"logs": logs, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/scheduler/config")
+async def get_scheduler_config():
+    """Get scheduler configuration."""
+    try:
+        from config import load_config
+        config = load_config()
+        return config.get("scheduler", {})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scheduler/config")
+async def update_scheduler_config(config_update: Dict):
+    """Update scheduler configuration (currently only supports enabling/disabling)."""
+    try:
+        import json
+        import os
+        
+        # Load current config
+        config_file = "config.json"
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        else:
+            from config import DEFAULT_CONFIG
+            config = DEFAULT_CONFIG.copy()
+        
+        # Update scheduler enabled status if provided
+        if "enabled" in config_update:
+            if "scheduler" not in config:
+                config["scheduler"] = {}
+            config["scheduler"]["enabled"] = bool(config_update["enabled"])
+            
+            # Save to file
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+            
+            # If disabling, stop scheduler; if enabling, start it
+            from scheduler import get_scheduler_manager
+            scheduler_manager = get_scheduler_manager()
+            
+            if not config_update["enabled"]:
+                scheduler_manager.stop()
+                return {"status": "disabled", "message": "Scheduler disabled. Restart server to re-enable."}
+            else:
+                if not scheduler_manager.scheduler or not scheduler_manager.scheduler.running:
+                    scheduler_manager.start()
+                    return {"status": "enabled", "message": "Scheduler enabled and started."}
+                else:
+                    return {"status": "enabled", "message": "Scheduler already running."}
+        
+        return {"status": "updated", "message": "Configuration updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin")
+async def admin_page():
+    """Serve the admin page."""
+    try:
+        with open("admin.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Admin page not found</h1>", status_code=404)
 
 
 if __name__ == "__main__":
