@@ -2263,12 +2263,15 @@
                     display.innerHTML = cachedHtml;
                     display.classList.remove('empty');
                     
-                    // Set state variables for consistency
+                    // Set state variables from cached data (will be updated when fresh data arrives)
                     const totalNews = cachedData.total_news || 0;
                     const totalTrades = cachedData.total_trades || 0;
                     totalItems = totalNews + totalTrades;
                     currentOffset = 0;
                     currentItemType = 'all';
+                    
+                    // NOTE: Don't add Load More button here - wait for fresh data to determine correct totals
+                    // The fresh data fetch below will update the button state correctly
                     
                     // Load liked news and thoughts in background
                     loadLikedNews().catch(err => console.error('Error loading liked news:', err));
@@ -2313,11 +2316,77 @@
                     saveMergedItemsCache(data);
                 }
                 
-                // Only update display if we didn't already show cached data, or if data is different
-                if (!cachedData || JSON.stringify(cachedData) !== JSON.stringify(data)) {
+                // Update state variables with fresh totals (always use fresh data, not cached)
+                const totalNews = data.total_news || 0;
+                const totalTrades = data.total_trades || 0;
+                totalItems = totalNews + totalTrades;
+                
+                // Check if cached data is incomplete (has fewer items than total)
+                const cachedNewsCount = cachedData ? (cachedData.news || []).length : 0;
+                const cachedTradesCount = cachedData ? (cachedData.trades || []).length : 0;
+                const freshNewsCount = (data.news || []).length;
+                const freshTradesCount = (data.trades || []).length;
+                
+                // If cached HTML was shown but fresh data has more items, we need to re-render
+                const cacheIncomplete = (cachedHtml && cachedData) && (
+                    (freshNewsCount > cachedNewsCount) || 
+                    (freshTradesCount > cachedTradesCount) ||
+                    (totalNews > cachedNewsCount) ||
+                    (totalTrades > cachedTradesCount)
+                );
+                
+                // Only update display if we didn't already show cached data, or if data is different, or if cache is incomplete
+                if (!cachedData || JSON.stringify(cachedData) !== JSON.stringify(data) || cacheIncomplete) {
+                    if (cacheIncomplete) {
+                        console.log('[DEBUG] Cache incomplete - re-rendering with fresh data');
+                    }
                     await renderMergedItemsContent(data, itemType, offset, append, display);
                 } else {
                     console.log('[DEBUG] Fresh data matches cache, no update needed');
+                    // Still update Load More button in case total counts changed or button was missing
+                    // This is critical when rendering from cached HTML - we need to check fresh totals
+                    const totalNews = data.total_news || 0;
+                    const totalTrades = data.total_trades || 0;
+                    const hasMoreNews = (offset + (data.news || []).length) < totalNews;
+                    const hasMoreTrades = (offset + (data.trades || []).length) < totalTrades;
+                    
+                    const newsTab = document.getElementById('tab-news');
+                    const tradesTab = document.getElementById('tab-trades');
+                    
+                    // Remove existing buttons first
+                    if (newsTab) {
+                        const existingBtn = newsTab.querySelector('.load-more-button');
+                        if (existingBtn) existingBtn.remove();
+                    }
+                    if (tradesTab) {
+                        const existingBtn = tradesTab.querySelector('.load-more-button');
+                        if (existingBtn) existingBtn.remove();
+                    }
+                    
+                    // Add buttons if needed (based on fresh totals, not cached)
+                    if (hasMoreNews || hasMoreTrades) {
+                        if (newsTab && hasMoreNews && itemType !== 'trades') {
+                            const loadMoreBtn = document.createElement('button');
+                            loadMoreBtn.className = 'load-more-button';
+                            loadMoreBtn.textContent = 'Load More';
+                            loadMoreBtn.onclick = () => loadMoreItems();
+                            newsTab.appendChild(loadMoreBtn);
+                        }
+                        
+                        if (tradesTab && hasMoreTrades && itemType !== 'news') {
+                            const loadMoreBtn = document.createElement('button');
+                            loadMoreBtn.className = 'load-more-button';
+                            loadMoreBtn.textContent = 'Load More';
+                            loadMoreBtn.onclick = () => loadMoreItems();
+                            tradesTab.appendChild(loadMoreBtn);
+                        }
+                    } else {
+                        // Remove buttons if no more items
+                        document.querySelectorAll('.load-more-button').forEach(btn => {
+                            btn.disabled = true;
+                            btn.textContent = 'No More Items';
+                        });
+                    }
                 }
                 
             } catch (error) {

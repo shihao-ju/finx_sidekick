@@ -105,11 +105,15 @@ async def startup_event():
     except Exception as e:
         print(f"[WARNING] Migration failed (non-critical): {e}", flush=True)
     
-    # Start scheduler
+    # Start scheduler (must be done after event loop is running)
+    # AsyncIOScheduler requires a running event loop
+    # Since we're in an async startup event, the loop is already running
     try:
         from scheduler import get_scheduler_manager
         scheduler_manager = get_scheduler_manager()
+        # Start scheduler - it will check for running event loop internally
         scheduler_manager.start()
+        print("[INFO] Scheduler startup initiated", flush=True)
     except Exception as e:
         print(f"[ERROR] Failed to start scheduler: {e}", flush=True)
         import traceback
@@ -1070,6 +1074,17 @@ async def root(response: Response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     with open("index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+
+
+@app.get("/database-viewer")
+async def database_viewer(response: Response):
+    """Serve the database viewer HTML."""
+    # Prevent caching
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    with open("database_viewer.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
 
 

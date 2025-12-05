@@ -37,14 +37,56 @@ class SchedulerManager:
             return
         
         print("[INFO] Starting scheduler...")
-        self.scheduler = AsyncIOScheduler(timezone=pytz.UTC)
+        # Use event_loop parameter to ensure we use the current running loop
+        try:
+            loop = asyncio.get_running_loop()
+            self.scheduler = AsyncIOScheduler(event_loop=loop, timezone=pytz.UTC)
+            print(f"[DEBUG] Created AsyncIOScheduler with event loop: {loop}", flush=True)
+        except RuntimeError:
+            # No running loop - create scheduler without specifying loop
+            # It will create its own loop
+            self.scheduler = AsyncIOScheduler(timezone=pytz.UTC)
+            print(f"[DEBUG] Created AsyncIOScheduler without event loop (will create its own)", flush=True)
         
         # Schedule jobs based on configuration
         self._schedule_market_hours()
         self._schedule_after_market()
         self._schedule_weekends()
         
-        self.scheduler.start()
+        # AsyncIOScheduler.start() requires a running event loop
+        # Check if we're in an async context with a running loop
+        try:
+            loop = asyncio.get_running_loop()
+            # We have a running loop, start the scheduler
+            print(f"[DEBUG] Found running event loop, starting scheduler...", flush=True)
+            self.scheduler.start()
+            print(f"[DEBUG] Scheduler.start() called successfully", flush=True)
+            
+            # Verify scheduler is actually running
+            if self.scheduler.running:
+                print(f"[DEBUG] Scheduler.running = True", flush=True)
+                jobs = self.scheduler.get_jobs()
+                print(f"[DEBUG] Number of scheduled jobs: {len(jobs)}", flush=True)
+                for job in jobs:
+                    next_run = job.next_run_time
+                    if next_run:
+                        print(f"[DEBUG] Job '{job.id}' next run: {next_run}", flush=True)
+                    else:
+                        print(f"[DEBUG] Job '{job.id}' has no next run time!", flush=True)
+            else:
+                print(f"[ERROR] Scheduler.start() was called but scheduler.running = False!", flush=True)
+                
+        except RuntimeError as e:
+            # No running loop - this is a problem
+            print(f"[ERROR] No running event loop found: {e}", flush=True)
+            print("[ERROR] Cannot start AsyncIOScheduler without event loop.", flush=True)
+            print("[ERROR] Scheduler will not run. Make sure server is started properly.", flush=True)
+            return
+        except Exception as e:
+            print(f"[ERROR] Unexpected error starting scheduler: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return
         
         # If we were paused before restart, pause again
         if self.is_paused:
@@ -52,6 +94,9 @@ class SchedulerManager:
             print("[INFO] Scheduler started in paused state")
         else:
             print("[INFO] Scheduler started successfully")
+            # Double-check it's actually running
+            if not self.scheduler.running:
+                print("[ERROR] CRITICAL: Scheduler.start() was called but scheduler is NOT running!", flush=True)
     
     def stop(self):
         """Stop the scheduler."""
@@ -178,28 +223,19 @@ class SchedulerManager:
         
         # Get timezone objects
         et_tz = pytz.timezone(timezone_str)
-        utc_tz = pytz.UTC
         
-        # Create datetime objects in ET timezone for today
-        et_now = datetime.now(et_tz)
-        today_start_et = et_now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
-        today_end_et = et_now.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
-        
-        # Convert to UTC to get UTC hour range
-        today_start_utc = today_start_et.astimezone(utc_tz)
-        today_end_utc = today_end_et.astimezone(utc_tz)
-        
-        start_hour_utc = today_start_utc.hour
-        end_hour_utc = today_end_utc.hour
-        
-        # Handle case where end time might be next day in UTC (e.g., 4 PM ET = 9 PM UTC, but if DST, could be 8 PM UTC)
-        # Also handle case where start hour > end hour in UTC (e.g., 9:30 AM ET = 2:30 PM UTC, 4 PM ET = 9 PM UTC)
-        # For simplicity, use the ET timezone directly in CronTrigger
+        # Create CronTrigger for market hours
+        # Use minute="*/interval" to trigger every interval_minutes during the hour range
+        # This will trigger at :00 and :30 (for 30-min interval) for each hour
+        # We'll add a time check in _scheduled_refresh to ensure we don't run before start_time or after end_time
         trigger = CronTrigger(
             hour=f"{start_hour}-{end_hour}",
-            minute=f"*/{interval_minutes}",
-            timezone=et_tz  # Use ET timezone directly instead of UTC
+            minute=f"*/{interval_minutes}",  # Every interval_minutes (e.g., */30 gives :00 and :30)
+            timezone=et_tz
         )
+        
+        # Note: This will trigger at :00 and :30 for each hour in the range
+        # The _scheduled_refresh function will check if we're actually within market hours
         
         self.scheduler.add_job(
             self._scheduled_refresh,
@@ -288,7 +324,10 @@ class SchedulerManager:
         # Check if we should fetch today (skip weekends/holidays for market_hours)
         if fetch_type == "market_hours":
             et_tz = pytz.timezone("America/New_York")
-            today = datetime.now(et_tz).date()
+            now_et = datetime.now(et_tz)
+            today = now_et.date()
+            
+            # Check if today is weekend/holiday
             if not should_fetch_today(today):
                 print(f"[INFO] Skipping market hours fetch - today is weekend or holiday")
                 log_scheduler_event(
@@ -296,6 +335,28 @@ class SchedulerManager:
                     fetch_type=fetch_type,
                     status="skipped",
                     error_message=f"Today ({today}) is weekend or holiday"
+                )
+                return
+            
+            # Additional check: ensure we're actually in market hours
+            # (CronTrigger might trigger slightly outside the window)
+            market_config = self.config.get("market_hours", {})
+            start_time = market_config.get("start", "09:30")
+            end_time = market_config.get("end", "16:00")
+            start_hour, start_minute = map(int, start_time.split(":"))
+            end_hour, end_minute = map(int, end_time.split(":"))
+            
+            market_start = now_et.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+            market_end = now_et.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+            
+            if not (market_start <= now_et <= market_end):
+                # Outside market hours, skip
+                print(f"[INFO] Skipping market hours fetch - current time {now_et.strftime('%H:%M')} is outside market hours ({start_time}-{end_time})")
+                log_scheduler_event(
+                    account_handle=None,
+                    fetch_type=fetch_type,
+                    status="skipped",
+                    error_message=f"Current time {now_et.strftime('%H:%M')} is outside market hours"
                 )
                 return
         
