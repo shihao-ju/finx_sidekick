@@ -1077,17 +1077,6 @@ async def root(response: Response):
         return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
 
 
-@app.get("/database-viewer")
-async def database_viewer(response: Response):
-    """Serve the database viewer HTML."""
-    # Prevent caching
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    with open("database_viewer.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
-
-
 @app.get("/favicon.ico")
 async def favicon():
     """Handle favicon requests to prevent 404 errors."""

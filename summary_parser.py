@@ -67,6 +67,8 @@ def parse_news_items(summary_text: str, tweet_ids: List[str], generation_timesta
                     if len(content_part) > 10:  # Ensure we have content
                         # Extract title (remove leading ** and trailing **:)
                         title = title_part[2:-3].strip()  # Remove ** at start and **: at end
+                        # Remove all ** markers from title (e.g., **$INTC** -> $INTC)
+                        title = title.replace('**', '')
                         # Create a mock match object
                         class MockMatch:
                             def group(self, n):
@@ -101,6 +103,8 @@ def parse_news_items(summary_text: str, tweet_ids: List[str], generation_timesta
                     if len(content_part) > 10:  # Ensure we have content
                         # Extract title (remove leading ** and trailing **:)
                         title = title_part[2:-3].strip()  # Remove ** at start and **: at end
+                        # Remove all ** markers from title (e.g., **$INTC** -> $INTC)
+                        title = title.replace('**', '')
                         # Save previous item if exists
                         if current_item:
                             news_items.append(current_item)
@@ -302,6 +306,8 @@ def parse_trades_items(summary_text: str, tweet_ids: List[str], generation_times
                     if len(content_part) > 10:  # Ensure we have content
                         # Extract title (remove leading ** and trailing **:)
                         title = title_part[2:-3].strip()  # Remove ** at start and **: at end
+                        # Remove all ** markers from title (e.g., **$INTC** -> $INTC)
+                        title = title.replace('**', '')
                         # Create a mock match object
                         class MockMatch:
                             def group(self, n):
@@ -320,6 +326,8 @@ def parse_trades_items(summary_text: str, tweet_ids: List[str], generation_times
                     if len(content_part) > 10:  # Ensure we have content
                         # Extract title (remove leading ** and trailing **:)
                         title = title_part[2:-3].strip()  # Remove ** at start and **: at end
+                        # Remove all ** markers from title (e.g., **$INTC** -> $INTC)
+                        title = title.replace('**', '')
                         # Save previous item if exists
                         if current_item:
                             news_items.append(current_item)
