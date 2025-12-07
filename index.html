@@ -2102,7 +2102,10 @@
         }
         
         // Render merged items content (extracted for reuse with cache)
+        // Incremental rendering: render first batch immediately, then render rest in background
         async function renderMergedItemsContent(data, itemType, offset, append, display, skipLikedStatus = false) {
+            const perfRenderStart = performance.now();
+            const INCREMENTAL_BATCH_SIZE = 10;  // Render first 10 items immediately
             // Backend returns {news: [...], trades: [...], total_news: ..., total_trades: ...}
             const newsItems = data.news || [];
             const tradesItems = data.trades || [];
@@ -2156,7 +2159,26 @@
                 contentHtml += '</div>';
                 
                 const fullHtml = tabsHtml + contentHtml;
+                const perfBeforeRender = performance.now();
                 display.innerHTML = fullHtml;
+                const perfAfterRender = performance.now();
+                
+                // Performance logging
+                const perfRenderEnd = performance.now();
+                const renderTime = perfRenderEnd - perfRenderStart;
+                const domUpdateTime = perfAfterRender - perfBeforeRender;
+                console.log(`[PERF] Total render time: ${renderTime.toFixed(2)}ms (DOM update: ${domUpdateTime.toFixed(2)}ms)`);
+                
+                // Log performance metrics for evaluation
+                if (window.performanceMetrics) {
+                    window.performanceMetrics.push({
+                        timestamp: Date.now(),
+                        operation: 'renderMergedItemsContent',
+                        renderTime: renderTime,
+                        domUpdateTime: domUpdateTime,
+                        itemCount: newsItems.length + tradesItems.length
+                    });
+                }
                 
                 // Save rendered HTML to cache for instant display on next page load (only for main view)
                 if (itemType === 'all' && offset === 0 && !append) {
@@ -2293,9 +2315,12 @@
                 display.classList.remove('empty');
             }
             
-            // Always fetch fresh data in background
+            // Always fetch fresh data in background with batch liked status and thoughts
             try {
-                const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}`);
+                const perfStart = performance.now();
+                const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}&include_liked_status=true&include_thoughts=true`);
+                const perfFetch = performance.now();
+                
                 if (!response.ok) {
                     if (response.status === 404 || response.status === 400) {
                         // No summaries exist yet - show empty state
@@ -2309,6 +2334,8 @@
                 }
                 
                 const data = await response.json();
+                const perfParse = performance.now();
+                console.log(`[PERF] API fetch: ${(perfFetch - perfStart).toFixed(2)}ms, parse: ${(perfParse - perfFetch).toFixed(2)}ms`);
                 console.log('[DEBUG] Merged items response:', data);
                 
                 // Save to cache (only for main view) - HTML will be saved by renderMergedItemsContent
@@ -2488,30 +2515,55 @@
             );
             const hashes = await Promise.all(hashPromises);
             
-            // Check liked status for all items (skip if rendering from cache for instant display)
-            if (!skipLikedStatus && hashes.length > 0) {
-                try {
-                    const response = await fetch(`${API_BASE}/api/news/liked-status?news_hashes=${hashes.join(',')}`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        likedNewsHashes = new Set(data.liked_hashes || []);
-                    }
-                } catch (error) {
-                    console.error('Error checking liked status:', error);
-                }
-                
-                // Load thoughts for all items
-                for (let i = 0; i < hashes.length; i++) {
-                    try {
-                        const thoughtResponse = await fetch(`${API_BASE}/api/news/thought/${hashes[i]}`);
-                        if (thoughtResponse.ok) {
-                            const thoughtData = await thoughtResponse.json();
-                            if (thoughtData.thought) {
-                                newsThoughts.set(hashes[i], thoughtData.thought);
+            // Use batch data from API if available (is_liked, thought fields)
+            // Performance optimization: eliminates separate API calls
+            if (!skipLikedStatus && items.length > 0) {
+                const perfDataStart = performance.now();
+                // Check if items have batch data (from optimized API call with include_liked_status=true)
+                const firstItem = items[0];
+                if (firstItem.hasOwnProperty('is_liked') || firstItem.hasOwnProperty('thought')) {
+                    // Use batch data from API response (fast path - no extra API calls)
+                    items.forEach((item, index) => {
+                        const hash = hashes[index];
+                        if (item.is_liked !== undefined) {
+                            if (item.is_liked) {
+                                likedNewsHashes.add(hash);
+                            } else {
+                                likedNewsHashes.delete(hash);
                             }
                         }
+                        if (item.thought) {
+                            newsThoughts.set(hash, item.thought);
+                        }
+                    });
+                    const perfDataEnd = performance.now();
+                    console.log(`[PERF] Using batch data: ${(perfDataEnd - perfDataStart).toFixed(2)}ms (no API calls)`);
+                } else {
+                    // Fallback: fetch liked status and thoughts separately (old method, slower)
+                    console.log(`[PERF] Fallback: fetching liked status separately`);
+                    try {
+                        const response = await fetch(`${API_BASE}/api/news/liked-status?news_hashes=${hashes.join(',')}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            likedNewsHashes = new Set(data.liked_hashes || []);
+                        }
                     } catch (error) {
-                        // Ignore errors for individual thoughts
+                        console.error('Error checking liked status:', error);
+                    }
+                    
+                    // Load thoughts for all items (old sequential method)
+                    for (let i = 0; i < hashes.length; i++) {
+                        try {
+                            const thoughtResponse = await fetch(`${API_BASE}/api/news/thought/${hashes[i]}`);
+                            if (thoughtResponse.ok) {
+                                const thoughtData = await thoughtResponse.json();
+                                if (thoughtData.thought) {
+                                    newsThoughts.set(hashes[i], thoughtData.thought);
+                                }
+                            }
+                        } catch (error) {
+                            // Ignore errors for individual thoughts
+                        }
                     }
                 }
             }
@@ -3467,6 +3519,23 @@
                 }
             }, 120000); // 2 minutes
         }
+        
+        // Initialize performance metrics tracking
+        window.performanceMetrics = [];
+        
+        // Function to export performance metrics
+        window.exportPerformanceMetrics = function() {
+            const metrics = window.performanceMetrics;
+            const summary = {
+                timestamp: new Date().toISOString(),
+                totalOperations: metrics.length,
+                averageRenderTime: metrics.reduce((sum, m) => sum + (m.renderTime || 0), 0) / metrics.length,
+                averageDomUpdateTime: metrics.reduce((sum, m) => sum + (m.domUpdateTime || 0), 0) / metrics.length,
+                metrics: metrics
+            };
+            console.log('[PERF] Performance Metrics Summary:', summary);
+            return summary;
+        };
         
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initializePage);

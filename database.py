@@ -152,6 +152,17 @@ def init_database():
     except sqlite3.OperationalError:
         pass  # Column already exists
     
+    # Migrate parsed_news_items and parsed_trades_items to add content_hash column
+    try:
+        cursor.execute("ALTER TABLE parsed_news_items ADD COLUMN content_hash TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute("ALTER TABLE parsed_trades_items ADD COLUMN content_hash TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
     # Create indexes for faster queries
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_timestamp ON summaries(timestamp)
@@ -179,6 +190,13 @@ def init_database():
     """)
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_parsed_trades_timestamp ON parsed_trades_items(timestamp)
+    """)
+    # Unique index on content_hash for deduplication
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_parsed_news_hash ON parsed_news_items(content_hash)
+    """)
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_parsed_trades_hash ON parsed_trades_items(content_hash)
     """)
     
     conn.commit()
@@ -354,6 +372,7 @@ def get_summary_count() -> int:
 def save_parsed_news_items(summary_id: int, news_items: List[Dict]) -> None:
     """
     Save parsed news items for a summary.
+    Uses content_hash to prevent duplicates at the database level.
     
     Args:
         summary_id: ID of the summary these items belong to
@@ -368,18 +387,27 @@ def save_parsed_news_items(summary_id: int, news_items: List[Dict]) -> None:
     # Delete existing parsed items for this summary (in case of update)
     cursor.execute("DELETE FROM parsed_news_items WHERE summary_id = ?", (summary_id,))
     
-    # Insert new parsed items
+    # Insert new parsed items with deduplication via content_hash
     for item in news_items:
+        # Generate content hash for deduplication
+        # Hash is based on title, content, and tweet_ids (normalized)
+        normalized_tweet_ids = sorted(set(str(tid) for tid in item.get("tweet_ids", [])))
+        content_for_hash = f"{item.get('title', '')}|{item.get('content', '')}|{json.dumps(normalized_tweet_ids, sort_keys=True)}"
+        content_hash = hashlib.sha256(content_for_hash.encode('utf-8')).hexdigest()
+        
+        # Use INSERT OR IGNORE to skip duplicates (based on unique index on content_hash)
         cursor.execute("""
-            INSERT INTO parsed_news_items (summary_id, title, content, timestamp, tweet_ids, source_tags)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO parsed_news_items 
+            (summary_id, title, content, timestamp, tweet_ids, source_tags, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             summary_id,
             item.get("title", ""),
             item.get("content", ""),
             item.get("timestamp", ""),
-            json.dumps(item.get("tweet_ids", [])),
-            json.dumps(item.get("source_tags", []))
+            json.dumps(normalized_tweet_ids),
+            json.dumps(item.get("source_tags", [])),
+            content_hash
         ))
     
     conn.commit()
@@ -389,6 +417,7 @@ def save_parsed_news_items(summary_id: int, news_items: List[Dict]) -> None:
 def save_parsed_trades_items(summary_id: int, trades_items: List[Dict]) -> None:
     """
     Save parsed trades items for a summary.
+    Uses content_hash to prevent duplicates at the database level.
     
     Args:
         summary_id: ID of the summary these items belong to
@@ -403,18 +432,27 @@ def save_parsed_trades_items(summary_id: int, trades_items: List[Dict]) -> None:
     # Delete existing parsed items for this summary (in case of update)
     cursor.execute("DELETE FROM parsed_trades_items WHERE summary_id = ?", (summary_id,))
     
-    # Insert new parsed items
+    # Insert new parsed items with deduplication via content_hash
     for item in trades_items:
+        # Generate content hash for deduplication
+        # Hash is based on title, content, and tweet_ids (normalized)
+        normalized_tweet_ids = sorted(set(str(tid) for tid in item.get("tweet_ids", [])))
+        content_for_hash = f"{item.get('title', '')}|{item.get('content', '')}|{json.dumps(normalized_tweet_ids, sort_keys=True)}"
+        content_hash = hashlib.sha256(content_for_hash.encode('utf-8')).hexdigest()
+        
+        # Use INSERT OR IGNORE to skip duplicates (based on unique index on content_hash)
         cursor.execute("""
-            INSERT INTO parsed_trades_items (summary_id, title, content, timestamp, tweet_ids, source_tags)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO parsed_trades_items 
+            (summary_id, title, content, timestamp, tweet_ids, source_tags, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             summary_id,
             item.get("title", ""),
             item.get("content", ""),
             item.get("timestamp", ""),
-            json.dumps(item.get("tweet_ids", [])),
-            json.dumps(item.get("source_tags", []))
+            json.dumps(normalized_tweet_ids),
+            json.dumps(item.get("source_tags", [])),
+            content_hash
         ))
     
     conn.commit()
@@ -1164,6 +1202,36 @@ def get_news_thought(news_hash: str) -> Optional[str]:
     conn.close()
     
     return row[0] if row else None
+
+
+def get_thoughts_batch(news_hashes: List[str]) -> Dict[str, str]:
+    """
+    Get thoughts for multiple news items in a single query (batch operation for performance).
+    
+    Args:
+        news_hashes: List of news hashes to check
+    
+    Returns:
+        Dictionary mapping news_hash -> thought text (only includes hashes that have thoughts)
+    """
+    if not news_hashes:
+        return {}
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Create placeholders for IN clause
+    placeholders = ','.join(['?'] * len(news_hashes))
+    cursor.execute(f"""
+        SELECT news_hash, thought FROM news_thoughts
+        WHERE news_hash IN ({placeholders})
+        AND thought IS NOT NULL AND TRIM(thought) != ''
+    """, news_hashes)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return {row[0]: row[1] for row in rows}
 
 
 def get_liked_status(news_hashes: List[str]) -> List[str]:

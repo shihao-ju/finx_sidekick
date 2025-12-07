@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Response Checker</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>API Response Checker</h1>
+    <div class="section">
+        <h2>Test 1: Check API Response Structure</h2>
+        <button onclick="checkAPI()">Check API Response</button>
+        <div id="result1"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Test 2: Compare With/Without Batch Parameters</h2>
+        <button onclick="compareAPIs()">Compare APIs</button>
+        <div id="result2"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://finx.ai-builders.space';
+        
+        async function checkAPI() {
+            const resultDiv = document.getElementById('result1');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const url = `${API_BASE}/merged-items?limit=5&include_liked_status=true&include_thoughts=true`;
+                console.log('Fetching:', url);
+                
+                const start = performance.now();
+                const response = await fetch(url);
+                const fetchTime = performance.now() - start;
+                
+                const data = await response.json();
+                const parseTime = performance.now() - start - fetchTime;
+                
+                const firstNews = data.news && data.news[0];
+                const firstTrade = data.trades && data.trades[0];
+                
+                let html = `<div class="success">✅ API Call Successful</div>`;
+                html += `<p>Fetch Time: ${fetchTime.toFixed(2)}ms</p>`;
+                html += `<p>Response Status: ${response.status}</p>`;
+                html += `<h3>Response Structure:</h3>`;
+                html += `<pre>${JSON.stringify({
+                    total_news: data.total_news,
+                    total_trades: data.total_trades,
+                    news_count: data.news?.length || 0,
+                    trades_count: data.trades?.length || 0
+                }, null, 2)}</pre>`;
+                
+                html += `<h3>First News Item Structure:</h3>`;
+                if (firstNews) {
+                    const hasIsLiked = firstNews.hasOwnProperty('is_liked');
+                    const hasThought = firstNews.hasOwnProperty('thought');
+                    
+                    html += `<div class="${hasIsLiked ? 'success' : 'error'}">`;
+                    html += `has 'is_liked': ${hasIsLiked} ${hasIsLiked ? '✅' : '❌'}<br>`;
+                    html += `has 'thought': ${hasThought} ${hasThought ? '✅' : '❌'}`;
+                    html += `</div>`;
+                    
+                    html += `<pre>${JSON.stringify({
+                        title: firstNews.title?.substring(0, 50),
+                        has_is_liked: hasIsLiked,
+                        is_liked_value: firstNews.is_liked,
+                        has_thought: hasThought,
+                        thought_length: firstNews.thought?.length || 0
+                    }, null, 2)}</pre>`;
+                } else {
+                    html += `<div class="error">No news items found</div>`;
+                }
+                
+                resultDiv.innerHTML = html;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function compareAPIs() {
+            const resultDiv = document.getElementById('result2');
+            resultDiv.innerHTML = 'Comparing...';
+            
+            try {
+                // Test without batch parameters
+                const start1 = performance.now();
+                const res1 = await fetch(`${API_BASE}/merged-items?limit=5`);
+                const data1 = await res1.json();
+                const time1 = performance.now() - start1;
+                
+                // Test with batch parameters
+                const start2 = performance.now();
+                const res2 = await fetch(`${API_BASE}/merged-items?limit=5&include_liked_status=true&include_thoughts=true`);
+                const data2 = await res2.json();
+                const time2 = performance.now() - start2;
+                
+                const first1 = data1.news?.[0];
+                const first2 = data2.news?.[0];
+                
+                let html = '<h3>Comparison Results:</h3>';
+                html += `<table border="1" cellpadding="10">`;
+                html += `<tr><th>Metric</th><th>Without Batch</th><th>With Batch</th></tr>`;
+                html += `<tr><td>Response Time</td><td>${time1.toFixed(2)}ms</td><td>${time2.toFixed(2)}ms</td></tr>`;
+                html += `<tr><td>Has 'is_liked'</td><td>${first1?.hasOwnProperty('is_liked') ? '✅' : '❌'}</td><td>${first2?.hasOwnProperty('is_liked') ? '✅' : '❌'}</td></tr>`;
+                html += `<tr><td>Has 'thought'</td><td>${first1?.hasOwnProperty('thought') ? '✅' : '❌'}</td><td>${first2?.hasOwnProperty('thought') ? '✅' : '❌'}</td></tr>`;
+                html += `</table>`;
+                
+                html += `<h3>Without Batch - First Item:</h3>`;
+                html += `<pre>${JSON.stringify(Object.keys(first1 || {}), null, 2)}</pre>`;
+                
+                html += `<h3>With Batch - First Item:</h3>`;
+                html += `<pre>${JSON.stringify(Object.keys(first2 || {}), null, 2)}</pre>`;
+                
+                resultDiv.innerHTML = html;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

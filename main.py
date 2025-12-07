@@ -223,6 +223,8 @@ class NewsTradeItem(BaseModel):
     source_tags: List[Dict]
     timestamp: str
     tweet_ids: List[str]
+    is_liked: Optional[bool] = None  # Added for batch liked status
+    thought: Optional[str] = None  # Added for batch thoughts
 
 
 class MergedItemsResponse(BaseModel):
@@ -383,8 +385,9 @@ def fetch_tweets_advanced_search(handle: str, since_timestamp_utc: Optional[str]
     until_dt = datetime.now(pytz.UTC)
     until_str = until_dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
     
-    # Construct query: from:handle since:timestamp until:timestamp include:nativeretweets
-    query = f"from:{handle.lstrip('@')} since:{since_str} until:{until_str} include:nativeretweets"
+    # Construct query: from:handle since:timestamp until:timestamp include:nativeretweets include:replies
+    # Include replies to catch all tweets from the account
+    query = f"from:{handle.lstrip('@')} since:{since_str} until:{until_str} include:nativeretweets include:replies"
     
     print(f"[DEBUG] Advanced Search query: {query}", file=sys.stderr, flush=True)
     print(f"[DEBUG] Time window: {since_str} to {until_str} ({(until_dt - dt).total_seconds():.1f} seconds)", file=sys.stderr, flush=True)
@@ -470,9 +473,20 @@ def fetch_tweets_hybrid(handle: str, since_id: Optional[str] = None,
                 print(f"[DEBUG] Advanced Search succeeded: {len(tweets)} tweets", file=sys.stderr, flush=True)
                 return tweets
             else:
-                # Advanced Search returned 0 tweets - this means no new tweets after the timestamp
-                # Trust this result and return empty list (don't fall back to since_id)
+                # Advanced Search returned 0 tweets - might be because:
+                # 1. No new tweets after the timestamp (correct)
+                # 2. Advanced Search doesn't include replies/retweets properly
+                # Try fallback to regular fetch if we have since_id
                 print(f"[DEBUG] Advanced Search returned 0 tweets - no new tweets after {last_fetch_timestamp_utc}", file=sys.stderr, flush=True)
+                if since_id:
+                    print(f"[DEBUG] Trying fallback fetch with since_id: {since_id} (Advanced Search might miss replies/retweets)", file=sys.stderr, flush=True)
+                    try:
+                        fallback_tweets = fetch_tweets(handle, since_id)
+                        if fallback_tweets:
+                            print(f"[DEBUG] Fallback fetch found {len(fallback_tweets)} tweets that Advanced Search missed", file=sys.stderr, flush=True)
+                            return fallback_tweets
+                    except Exception as e:
+                        print(f"[DEBUG] Fallback fetch also returned 0 tweets: {e}", file=sys.stderr, flush=True)
                 return []
         except Exception as e:
             # Only fall back if Advanced Search throws an error (not if it returns 0 results)
@@ -749,32 +763,48 @@ def _call_llm_sync(prompt: str, section_name: str) -> str:
         raise
 
 
-async def generate_summary(previous_summary: str, new_tweets: List[Dict], account_handles: List[str]) -> str:
+async def generate_summary(previous_summary: str, new_tweets: List[Dict], account_handles: List[str], account_tweet_map: Optional[Dict[str, List[Dict]]] = None) -> str:
     """
     Generate financial summary using AI Builder API.
     Splits into two parallel calls: one for News, one for Trades.
+    
+    Args:
+        previous_summary: Previous summary text for context
+        new_tweets: List of all new tweets (flat list)
+        account_handles: List of monitored account handles
+        account_tweet_map: Optional dict mapping account handle -> list of tweets fetched from that account
     """
     import sys
     print(f"[DEBUG] generate_summary called with {len(new_tweets)} tweets", file=sys.stderr, flush=True)
     
-    # Group tweets by account to ensure representation from each account
+    # Group tweets by monitored account handle (not by tweet author)
+    # This ensures retweets/replies are associated with the account they were fetched from
     tweets_by_account = {}
-    for tweet in new_tweets:
-        # Extract account handle from tweet
-        username = "unknown"
-        if "author" in tweet and isinstance(tweet["author"], dict):
-            username = tweet["author"].get("userName") or tweet["author"].get("screen_name") or tweet["author"].get("username", "unknown")
-        elif "user" in tweet and isinstance(tweet["user"], dict):
-            username = tweet["user"].get("screen_name") or tweet["user"].get("userName") or tweet["user"].get("username", "unknown")
-        elif "screen_name" in tweet:
-            username = tweet["screen_name"]
-        elif "userName" in tweet:
-            username = tweet["userName"]
-        
-        username_lower = username.lower()
-        if username_lower not in tweets_by_account:
-            tweets_by_account[username_lower] = []
-        tweets_by_account[username_lower].append(tweet)
+    if account_tweet_map:
+        # Use the account_tweet_map if provided (more accurate)
+        for handle in account_handles:
+            handle_lower = handle.lower()
+            tweets_from_account = account_tweet_map.get(handle_lower, [])
+            if tweets_from_account:
+                tweets_by_account[handle_lower] = tweets_from_account
+    else:
+        # Fallback: group by tweet author (less accurate for retweets/replies)
+        for tweet in new_tweets:
+            # Extract account handle from tweet author
+            username = "unknown"
+            if "author" in tweet and isinstance(tweet["author"], dict):
+                username = tweet["author"].get("userName") or tweet["author"].get("screen_name") or tweet["author"].get("username", "unknown")
+            elif "user" in tweet and isinstance(tweet["user"], dict):
+                username = tweet["user"].get("screen_name") or tweet["user"].get("userName") or tweet["user"].get("username", "unknown")
+            elif "screen_name" in tweet:
+                username = tweet["screen_name"]
+            elif "userName" in tweet:
+                username = tweet["userName"]
+            
+            username_lower = username.lower()
+            if username_lower not in tweets_by_account:
+                tweets_by_account[username_lower] = []
+            tweets_by_account[username_lower].append(tweet)
     
     print(f"[DEBUG] Tweets grouped by account: {[(k, len(v)) for k, v in tweets_by_account.items()]}", file=sys.stderr, flush=True)
     # Filter replies and count main tweets
@@ -1108,6 +1138,154 @@ async def manage_accounts(request: AccountRequest, token: str = require_auth):
         if username:
             update_account_username(handle, username)
         
+        # Fetch initial tweets for new account to:
+        # 1. Get username if not already fetched
+        # 2. Set proper initial tracking state (won't look "forward" from current time)
+        try:
+            print(f"[DEBUG] Fetching initial tweets for new account: {handle}", file=sys.stderr, flush=True)
+            # Fetch latest tweets (no since_id = fetch recent tweets, limited to first page ~20 tweets)
+            initial_tweets = fetch_tweets(handle, since_id=None)
+            
+            if initial_tweets:
+                print(f"[DEBUG] Fetched {len(initial_tweets)} initial tweets for {handle}", file=sys.stderr, flush=True)
+                
+                # Extract username from tweets if not already fetched
+                if not username:
+                    first_tweet = initial_tweets[0]
+                    author = first_tweet.get("author", {})
+                    if author:
+                        username = author.get("name")
+                        if username:
+                            update_account_username(handle, username)
+                            print(f"[DEBUG] Extracted username '{username}' from tweets for {handle}", file=sys.stderr, flush=True)
+                
+                # Set initial tracking state
+                latest_tweet = initial_tweets[0]  # Newest first
+                oldest_tweet = initial_tweets[-1]  # Oldest
+                
+                latest_tweet_id = latest_tweet.get("id_str") or latest_tweet.get("id")
+                
+                # Get timestamp of oldest tweet to set as last_fetch_timestamp_utc
+                # This ensures future fetches will only get NEW tweets after this point
+                oldest_created_at = oldest_tweet.get("createdAt")
+                if oldest_created_at:
+                    try:
+                        # Parse Twitter date format: "Tue Dec 02 03:56:50 +0000 2025"
+                        oldest_dt = datetime.strptime(oldest_created_at, "%a %b %d %H:%M:%S %z %Y")
+                        # Convert to UTC ISO format
+                        if oldest_dt.tzinfo is None:
+                            oldest_dt = pytz.UTC.localize(oldest_dt)
+                        last_fetch_timestamp_utc = oldest_dt.astimezone(pytz.UTC).isoformat()
+                    except (ValueError, AttributeError):
+                        # Fallback: try ISO format
+                        try:
+                            oldest_dt = datetime.fromisoformat(oldest_created_at.replace('Z', '+00:00'))
+                            if oldest_dt.tzinfo is None:
+                                oldest_dt = pytz.UTC.localize(oldest_dt)
+                            last_fetch_timestamp_utc = oldest_dt.astimezone(pytz.UTC).isoformat()
+                        except:
+                            # Last resort: use current time
+                            last_fetch_timestamp_utc = datetime.now(pytz.UTC).isoformat()
+                else:
+                    # No timestamp in tweet, use current time
+                    last_fetch_timestamp_utc = datetime.now(pytz.UTC).isoformat()
+                
+                # Update tracking with initial state
+                update_account_tracking(
+                    handle=handle,
+                    last_tweet_id=str(latest_tweet_id) if latest_tweet_id else None,
+                    last_fetch_timestamp_utc=last_fetch_timestamp_utc
+                )
+                print(f"[DEBUG] Set initial tracking for {handle}: last_tweet_id={latest_tweet_id}, timestamp={last_fetch_timestamp_utc}", file=sys.stderr, flush=True)
+                
+                # Generate summary from initial tweets and save news/trades
+                # This ensures the initial tweets are not wasted and appear in the frontend
+                try:
+                    print(f"[DEBUG] Generating summary from {len(initial_tweets)} initial tweets for {handle}", file=sys.stderr, flush=True)
+                    
+                    # Prepare tweets data structure for timestamp lookup
+                    # Save to test_tweets_data.json so it's available during parsing
+                    tweets_data_structure = {
+                        "fetch_timestamp": datetime.now().isoformat(),
+                        "total_accounts": 1,
+                        "accounts": [{
+                            "handle": handle,
+                            "fetch_timestamp": datetime.now().isoformat(),
+                            "tweet_count": len(initial_tweets),
+                            "tweets": initial_tweets
+                        }]
+                    }
+                    
+                    # Save tweets data to test_tweets_data.json for timestamp lookup
+                    # This file is read by save_summary when parsing news/trades
+                    with open("test_tweets_data.json", 'w', encoding='utf-8') as f:
+                        json.dump(tweets_data_structure, f, indent=2, ensure_ascii=False)
+                    
+                    # Get existing summary for context (if any)
+                    latest_summary_obj = get_latest_summary()
+                    previous_summary = latest_summary_obj.get("summary", "") if latest_summary_obj else ""
+                    
+                    # Generate summary from initial tweets
+                    account_handles = [handle]
+                    account_tweet_map = {handle.lower(): initial_tweets}
+                    initial_summary = await generate_summary(previous_summary, initial_tweets, account_handles, account_tweet_map)
+                    
+                    if initial_summary and initial_summary.strip():
+                        # Extract tweet IDs
+                        tweet_ids = []
+                        for tweet in initial_tweets:
+                            tweet_id = tweet.get("id_str") or tweet.get("id")
+                            if tweet_id:
+                                tweet_ids.append(str(tweet_id))
+                        
+                        # Get generation timestamp (use oldest tweet timestamp to preserve chronological order)
+                        # This ensures old tweets appear with their actual timestamps, not current time
+                        generation_timestamp = last_fetch_timestamp_utc  # Use oldest tweet timestamp
+                        
+                        # Save summary (this will automatically parse and save news/trades)
+                        # The parser will use test_tweets_data.json for timestamp lookup
+                        summary_id = save_summary(
+                            summary=initial_summary,
+                            tweet_ids=tweet_ids,
+                            generation_timestamp=generation_timestamp
+                        )
+                        
+                        # Update account tracking with summary ID
+                        update_account_tracking(
+                            handle=handle,
+                            last_tweet_id=str(latest_tweet_id) if latest_tweet_id else None,
+                            last_fetch_timestamp_utc=last_fetch_timestamp_utc,
+                            last_summary_id=summary_id
+                        )
+                        
+                        print(f"[DEBUG] Generated and saved initial summary (ID: {summary_id}) with {len(tweet_ids)} tweets for {handle}", file=sys.stderr, flush=True)
+                    else:
+                        print(f"[DEBUG] Generated summary was empty for {handle}, skipping save", file=sys.stderr, flush=True)
+                        
+                except Exception as e:
+                    print(f"[WARNING] Failed to generate summary from initial tweets for {handle}: {e}", file=sys.stderr, flush=True)
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
+                    # Continue - account is still added successfully
+            else:
+                # No tweets found, set timestamp to current time
+                print(f"[DEBUG] No initial tweets found for {handle}, setting timestamp to current time", file=sys.stderr, flush=True)
+                update_account_tracking(
+                    handle=handle,
+                    last_tweet_id=None,
+                    last_fetch_timestamp_utc=datetime.now(pytz.UTC).isoformat()
+                )
+        except Exception as e:
+            print(f"[WARNING] Failed to fetch initial tweets for {handle}: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            # Still add account, but with no initial state (will be set on first scheduled fetch)
+            update_account_tracking(
+                handle=handle,
+                last_tweet_id=None,
+                last_fetch_timestamp_utc=datetime.now(pytz.UTC).isoformat()
+            )
+        
         accounts_data = get_monitored_accounts()
         accounts = [AccountInfo(handle=acc["handle"], username=acc.get("username")) for acc in accounts_data]
         return {"message": f"Account @{handle} added successfully", "accounts": accounts}
@@ -1325,7 +1503,7 @@ async def refresh_brief_logic() -> Optional[Dict]:
     # Generate new summary only if there are new tweets
     log(f"[DEBUG] About to call generate_summary with {len(all_new_tweets)} tweets")
     try:
-        new_summary = await generate_summary(combined_previous_summary, all_new_tweets, accounts)
+        new_summary = await generate_summary(combined_previous_summary, all_new_tweets, accounts, account_tweet_map)
         log(f"[DEBUG] generate_summary returned, length: {len(new_summary) if new_summary else 0}")
         if not new_summary or not new_summary.strip():
             log(f"[WARNING] generate_summary returned empty summary!")
@@ -1679,134 +1857,36 @@ async def get_summaries_endpoint(limit: int = 10, offset: int = 0):
 
 
 @app.get("/merged-items", response_model=MergedItemsResponse)
-async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "all"):
+async def get_merged_items(
+    limit: int = 10, 
+    offset: int = 0, 
+    item_type: str = "all",
+    include_liked_status: bool = Query(False, description="Include liked status for items"),
+    include_thoughts: bool = Query(False, description="Include thoughts for items")
+):
     """
     Get merged news and trades items from pre-computed parsed items, sorted chronologically.
     This endpoint is fast because it queries pre-parsed items instead of parsing summaries on-the-fly.
+    
+    Performance optimization: Can batch return liked status and thoughts to reduce HTTP round trips.
     
     Args:
         limit: Number of items to return per type (default: 10)
         offset: Number of items to skip (default: 0)
         item_type: "all", "news", or "trades" (default: "all")
+        include_liked_status: If True, include liked status for each item (default: False)
+        include_thoughts: If True, include thoughts for each item (default: False)
     
     Returns:
         MergedItemsResponse with chronologically sorted news and trades
     """
+    import time
+    start_time = time.time()
+    
     # Get pre-computed parsed items directly from database (fast!)
+    # Duplicates are prevented at the database level via unique index on content_hash
     all_news = get_all_parsed_news_items()
     all_trades = get_all_parsed_trades_items()
-    
-    # Deduplicate news and trades items
-    # Strategy: Use fuzzy matching on titles + tweet ID overlap to detect duplicates
-    def normalize_title(title: str) -> str:
-        """Normalize title for comparison (lowercase, remove extra spaces, remove markdown)"""
-        import re
-        if not title:
-            return ""
-        # Remove markdown formatting (handle ** anywhere in title)
-        normalized = title.replace("**", "").replace("*", "").strip()
-        # Remove ticker symbols for better matching ($SNOW -> SNOW)
-        normalized = re.sub(r'\$([A-Z]{1,5})\b', r'\1', normalized)
-        # Lowercase and remove extra spaces
-        normalized = " ".join(normalized.lower().split())
-        return normalized
-    
-    def extract_ticker_from_title(title: str) -> Optional[str]:
-        """Extract ticker symbol from title (e.g., $SNOW -> SNOW)"""
-        import re
-        match = re.search(r'\$([A-Z]{1,5})\b', title)
-        return match.group(1) if match else None
-    
-    def titles_similar(title1: str, title2: str, threshold: float = 0.6) -> bool:
-        """Check if two titles are similar using word overlap"""
-        norm1 = normalize_title(title1)
-        norm2 = normalize_title(title2)
-        
-        # Exact match after normalization
-        if norm1 == norm2:
-            return True
-        
-        # Word-based similarity
-        words1 = set(norm1.split())
-        words2 = set(norm2.split())
-        
-        if not words1 or not words2:
-            return False
-        
-        # Calculate Jaccard similarity (intersection over union)
-        intersection = len(words1 & words2)
-        union = len(words1 | words2)
-        similarity = intersection / union if union > 0 else 0
-        
-        return similarity >= threshold
-    
-    def tweet_ids_overlap(ids1: List[str], ids2: List[str]) -> bool:
-        """Check if tweet ID sets overlap significantly"""
-        set1 = set(str(tid) for tid in ids1)
-        set2 = set(str(tid) for tid in ids2)
-        
-        if not set1 or not set2:
-            return False
-        
-        # If sets are identical, definitely overlap
-        if set1 == set2:
-            return True
-        
-        # If one set is subset of another, overlap
-        if set1.issubset(set2) or set2.issubset(set1):
-            return True
-        
-        # If they share significant overlap (at least 50% of smaller set)
-        intersection = len(set1 & set2)
-        min_set_size = min(len(set1), len(set2))
-        
-        return intersection > 0 and (intersection / min_set_size >= 0.5)
-    
-    def deduplicate_items(items: List[Dict]) -> List[Dict]:
-        """Remove duplicate items using fuzzy title matching and tweet ID overlap"""
-        # Sort by timestamp (newest first) so we keep newer versions
-        items_sorted = sorted(items, key=lambda x: x.get("timestamp", ""), reverse=True)
-        
-        kept_items = []
-        for item in items_sorted:
-            is_duplicate = False
-            item_title = item.get("title", "")
-            item_tweet_ids = item.get("tweet_ids", [])
-            item_ticker = extract_ticker_from_title(item_title)
-            
-            # Check against all kept items
-            for kept_item in kept_items:
-                kept_title = kept_item.get("title", "")
-                kept_tweet_ids = kept_item.get("tweet_ids", [])
-                kept_ticker = extract_ticker_from_title(kept_title)
-                
-                # If tweet IDs overlap significantly
-                ids_overlap = tweet_ids_overlap(item_tweet_ids, kept_tweet_ids)
-                
-                if ids_overlap:
-                    # If tweet IDs match exactly, deduplicate even with lower title similarity
-                    set1 = set(str(tid) for tid in item_tweet_ids)
-                    set2 = set(str(tid) for tid in kept_tweet_ids)
-                    exact_match = (set1 == set2)
-                    
-                    # Check title similarity
-                    title_sim = titles_similar(item_title, kept_title, threshold=0.6 if exact_match else 0.7)
-                    
-                    # Also check if they mention the same ticker (for ticker-specific news)
-                    same_ticker = (item_ticker and kept_ticker and item_ticker == kept_ticker)
-                    
-                    # Deduplicate if: (titles similar) OR (same ticker + exact tweet IDs)
-                    if title_sim or (same_ticker and exact_match):
-                        is_duplicate = True
-                        break
-            
-            if not is_duplicate:
-                kept_items.append(item)
-        
-        return kept_items
-    
-    all_news = deduplicate_items(all_news)
-    all_trades = deduplicate_items(all_trades)
     
     # Sort by timestamp (newest first)
     all_news.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -1823,9 +1903,78 @@ async def get_merged_items(limit: int = 10, offset: int = 0, item_type: str = "a
         paginated_news = all_news[offset:offset + limit]
         paginated_trades = all_trades[offset:offset + limit]
     
+    # Batch fetch liked status and thoughts if requested
+    liked_hashes_set = set()
+    thoughts_map = {}
+    
+    if include_liked_status or include_thoughts:
+        from database import generate_news_hash, get_liked_status, get_thoughts_batch
+        
+        # Generate hashes for all paginated items
+        all_items = paginated_news + paginated_trades
+        item_hashes = []
+        for item in all_items:
+            item_hash = generate_news_hash(
+                item.get("title", ""),
+                item.get("content", ""),
+                item.get("timestamp", "")
+            )
+            item_hashes.append(item_hash)
+        
+        # Batch fetch liked status
+        if include_liked_status and item_hashes:
+            liked_hashes = get_liked_status(item_hashes)
+            liked_hashes_set = set(liked_hashes)
+        
+        # Batch fetch thoughts
+        if include_thoughts and item_hashes:
+            thoughts_map = get_thoughts_batch(item_hashes)
+    
+    # Build response items with optional liked status and thoughts
+    news_items = []
+    for item in paginated_news:
+        item_dict = dict(item)
+        if include_liked_status:
+            item_hash = generate_news_hash(
+                item.get("title", ""),
+                item.get("content", ""),
+                item.get("timestamp", "")
+            )
+            item_dict["is_liked"] = item_hash in liked_hashes_set
+        if include_thoughts:
+            item_hash = generate_news_hash(
+                item.get("title", ""),
+                item.get("content", ""),
+                item.get("timestamp", "")
+            )
+            item_dict["thought"] = thoughts_map.get(item_hash)
+        news_items.append(NewsTradeItem(**item_dict))
+    
+    trades_items = []
+    for item in paginated_trades:
+        item_dict = dict(item)
+        if include_liked_status:
+            item_hash = generate_news_hash(
+                item.get("title", ""),
+                item.get("content", ""),
+                item.get("timestamp", "")
+            )
+            item_dict["is_liked"] = item_hash in liked_hashes_set
+        if include_thoughts:
+            item_hash = generate_news_hash(
+                item.get("title", ""),
+                item.get("content", ""),
+                item.get("timestamp", "")
+            )
+            item_dict["thought"] = thoughts_map.get(item_hash)
+        trades_items.append(NewsTradeItem(**item_dict))
+    
+    elapsed_time = time.time() - start_time
+    print(f"[PERF] /merged-items: {elapsed_time*1000:.2f}ms (limit={limit}, include_liked={include_liked_status}, include_thoughts={include_thoughts})", file=sys.stderr, flush=True)
+    
     return MergedItemsResponse(
-        news=[NewsTradeItem(**item) for item in paginated_news],
-        trades=[NewsTradeItem(**item) for item in paginated_trades],
+        news=news_items,
+        trades=trades_items,
         total_news=len(all_news),
         total_trades=len(all_trades)
     )
