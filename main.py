@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import pytz
 from fastapi import FastAPI, HTTPException, Response, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import httpx
@@ -1939,8 +1939,8 @@ async def get_merged_items(
     news_items = []
     for item in paginated_news:
         item_dict = dict(item)
-        # Always include is_liked and thought fields when batch parameters are requested
-        # This allows frontend to detect batch data even if values are None/False
+        # Only add fields when batch parameters are True
+        # This allows frontend to detect batch data by checking if fields exist
         if include_liked_status:
             item_hash = generate_news_hash(
                 item.get("title", ""),
@@ -1948,9 +1948,6 @@ async def get_merged_items(
                 item.get("timestamp", "")
             )
             item_dict["is_liked"] = item_hash in liked_hashes_set
-        elif include_liked_status is False:
-            # Explicitly set to None so frontend knows batch data is not available
-            item_dict["is_liked"] = None
         
         if include_thoughts:
             item_hash = generate_news_hash(
@@ -1958,17 +1955,16 @@ async def get_merged_items(
                 item.get("content", ""),
                 item.get("timestamp", "")
             )
-            item_dict["thought"] = thoughts_map.get(item_hash)  # Returns None if not found
-        elif include_thoughts is False:
-            # Explicitly set to None so frontend knows batch data is not available
-            item_dict["thought"] = None
+            thought_value = thoughts_map.get(item_hash)  # Returns None if not found
+            # Always include thought field when requested, even if None
+            item_dict["thought"] = thought_value
         
         news_items.append(NewsTradeItem(**item_dict))
     
     trades_items = []
     for item in paginated_trades:
         item_dict = dict(item)
-        # Always include is_liked and thought fields when batch parameters are requested
+        # Only add fields when batch parameters are True
         if include_liked_status:
             item_hash = generate_news_hash(
                 item.get("title", ""),
@@ -1976,8 +1972,6 @@ async def get_merged_items(
                 item.get("timestamp", "")
             )
             item_dict["is_liked"] = item_hash in liked_hashes_set
-        elif include_liked_status is False:
-            item_dict["is_liked"] = None
         
         if include_thoughts:
             item_hash = generate_news_hash(
@@ -1985,21 +1979,28 @@ async def get_merged_items(
                 item.get("content", ""),
                 item.get("timestamp", "")
             )
-            item_dict["thought"] = thoughts_map.get(item_hash)  # Returns None if not found
-        elif include_thoughts is False:
-            item_dict["thought"] = None
+            thought_value = thoughts_map.get(item_hash)  # Returns None if not found
+            # Always include thought field when requested, even if None
+            item_dict["thought"] = thought_value
         
         trades_items.append(NewsTradeItem(**item_dict))
     
     elapsed_time = time.time() - start_time
     print(f"[PERF] /merged-items: {elapsed_time*1000:.2f}ms (limit={limit}, include_liked={include_liked_status}, include_thoughts={include_thoughts})", file=sys.stderr, flush=True)
     
-    return MergedItemsResponse(
+    # Build response with explicit serialization to ensure None values are included
+    response_data = MergedItemsResponse(
         news=news_items,
         trades=trades_items,
         total_news=len(all_news),
         total_trades=len(all_trades)
     )
+    
+    # Use model_dump with exclude_none=False to ensure all fields are included
+    # This is critical for frontend to detect batch data
+    response_dict = response_data.model_dump(exclude_none=False)
+    
+    return JSONResponse(content=response_dict)
 
 
 # ==================== News Likes and Thoughts API Endpoints ====================
