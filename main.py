@@ -225,6 +225,11 @@ class NewsTradeItem(BaseModel):
     tweet_ids: List[str]
     is_liked: Optional[bool] = None  # Added for batch liked status
     thought: Optional[str] = None  # Added for batch thoughts
+    
+    def model_dump(self, *, exclude_none: bool = False, **kwargs):
+        # Override to ensure None values are included in JSON output
+        # This allows frontend to detect batch data by checking if fields exist
+        return super().model_dump(exclude_none=False, **kwargs)
 
 
 class MergedItemsResponse(BaseModel):
@@ -1934,6 +1939,8 @@ async def get_merged_items(
     news_items = []
     for item in paginated_news:
         item_dict = dict(item)
+        # Always include is_liked and thought fields when batch parameters are requested
+        # This allows frontend to detect batch data even if values are None/False
         if include_liked_status:
             item_hash = generate_news_hash(
                 item.get("title", ""),
@@ -1941,18 +1948,27 @@ async def get_merged_items(
                 item.get("timestamp", "")
             )
             item_dict["is_liked"] = item_hash in liked_hashes_set
+        elif include_liked_status is False:
+            # Explicitly set to None so frontend knows batch data is not available
+            item_dict["is_liked"] = None
+        
         if include_thoughts:
             item_hash = generate_news_hash(
                 item.get("title", ""),
                 item.get("content", ""),
                 item.get("timestamp", "")
             )
-            item_dict["thought"] = thoughts_map.get(item_hash)
+            item_dict["thought"] = thoughts_map.get(item_hash)  # Returns None if not found
+        elif include_thoughts is False:
+            # Explicitly set to None so frontend knows batch data is not available
+            item_dict["thought"] = None
+        
         news_items.append(NewsTradeItem(**item_dict))
     
     trades_items = []
     for item in paginated_trades:
         item_dict = dict(item)
+        # Always include is_liked and thought fields when batch parameters are requested
         if include_liked_status:
             item_hash = generate_news_hash(
                 item.get("title", ""),
@@ -1960,13 +1976,19 @@ async def get_merged_items(
                 item.get("timestamp", "")
             )
             item_dict["is_liked"] = item_hash in liked_hashes_set
+        elif include_liked_status is False:
+            item_dict["is_liked"] = None
+        
         if include_thoughts:
             item_hash = generate_news_hash(
                 item.get("title", ""),
                 item.get("content", ""),
                 item.get("timestamp", "")
             )
-            item_dict["thought"] = thoughts_map.get(item_hash)
+            item_dict["thought"] = thoughts_map.get(item_hash)  # Returns None if not found
+        elif include_thoughts is False:
+            item_dict["thought"] = None
+        
         trades_items.append(NewsTradeItem(**item_dict))
     
     elapsed_time = time.time() - start_time
