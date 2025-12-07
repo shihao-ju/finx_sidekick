@@ -1861,7 +1861,7 @@ async def get_summaries_endpoint(limit: int = 10, offset: int = 0):
     )
 
 
-@app.get("/merged-items", response_model=MergedItemsResponse)
+@app.get("/merged-items", response_model=MergedItemsResponse, response_model_exclude_none=False)
 async def get_merged_items(
     limit: int = 10, 
     offset: int = 0, 
