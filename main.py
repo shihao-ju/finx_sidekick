@@ -226,10 +226,9 @@ class NewsTradeItem(BaseModel):
     is_liked: Optional[bool] = None  # Added for batch liked status
     thought: Optional[str] = None  # Added for batch thoughts
     
-    def model_dump(self, *, exclude_none: bool = False, **kwargs):
-        # Override to ensure None values are included in JSON output
-        # This allows frontend to detect batch data by checking if fields exist
-        return super().model_dump(exclude_none=False, **kwargs)
+    model_config = {
+        "extra": "allow"  # Allow extra fields
+    }
 
 
 class MergedItemsResponse(BaseModel):
@@ -1988,17 +1987,35 @@ async def get_merged_items(
     elapsed_time = time.time() - start_time
     print(f"[PERF] /merged-items: {elapsed_time*1000:.2f}ms (limit={limit}, include_liked={include_liked_status}, include_thoughts={include_thoughts})", file=sys.stderr, flush=True)
     
-    # Build response with explicit serialization to ensure None values are included
-    response_data = MergedItemsResponse(
-        news=news_items,
-        trades=trades_items,
-        total_news=len(all_news),
-        total_trades=len(all_trades)
-    )
+    # Build response - manually serialize to control which fields are included
+    # Only include is_liked and thought when batch parameters are True
+    # This allows frontend to detect batch data by checking if fields exist
+    news_dicts = []
+    for item in news_items:
+        item_dict = item.model_dump(exclude_none=False)
+        # Remove is_liked and thought if batch parameters were False
+        if not include_liked_status and "is_liked" in item_dict:
+            del item_dict["is_liked"]
+        if not include_thoughts and "thought" in item_dict:
+            del item_dict["thought"]
+        news_dicts.append(item_dict)
     
-    # Use model_dump with exclude_none=False to ensure all fields are included
-    # This is critical for frontend to detect batch data
-    response_dict = response_data.model_dump(exclude_none=False)
+    trades_dicts = []
+    for item in trades_items:
+        item_dict = item.model_dump(exclude_none=False)
+        # Remove is_liked and thought if batch parameters were False
+        if not include_liked_status and "is_liked" in item_dict:
+            del item_dict["is_liked"]
+        if not include_thoughts and "thought" in item_dict:
+            del item_dict["thought"]
+        trades_dicts.append(item_dict)
+    
+    response_dict = {
+        "news": news_dicts,
+        "trades": trades_dicts,
+        "total_news": len(all_news),
+        "total_trades": len(all_trades)
+    }
     
     return JSONResponse(content=response_dict)
 
