@@ -2406,17 +2406,23 @@
                 if (newsTab) {
                     const loadMoreBtn = document.createElement('button');
                     loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.id = 'load-more-news';
                     loadMoreBtn.textContent = 'Load More';
                     loadMoreBtn.onclick = () => loadMoreItems();
                     newsTab.appendChild(loadMoreBtn);
+                    // Setup infinite scroll observer
+                    setupInfiniteScroll(loadMoreBtn);
                 }
                 
                 if (tradesTab) {
                     const loadMoreBtn = document.createElement('button');
                     loadMoreBtn.className = 'load-more-button';
+                    loadMoreBtn.id = 'load-more-trades';
                     loadMoreBtn.textContent = 'Load More';
                     loadMoreBtn.onclick = () => loadMoreItems();
                     tradesTab.appendChild(loadMoreBtn);
+                    // Setup infinite scroll observer
+                    setupInfiniteScroll(loadMoreBtn);
                 }
             } else if (hasMore && append) {
                 const loadMoreBtns = document.querySelectorAll('.load-more-button');
