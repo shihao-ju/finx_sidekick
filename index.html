@@ -289,10 +289,45 @@
             padding: 30px;
             overflow-y: auto;
             flex: 1;
+            position: relative;
+        }
+        
+        /* When virtual scroll is active, remove padding from tab-content */
+        .tab-content .virtual-scroll-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 30px;
+            overflow-y: auto;
         }
 
         .tab-content.active {
             display: block;
+        }
+        
+        /* Virtual Scrolling Styles */
+        .virtual-scroll-container {
+            position: relative;
+            width: 100%;
+        }
+        
+        .virtual-scroll-spacer {
+            /* Placeholder to maintain scroll height */
+            height: 0;
+            transition: height 0.1s;
+            width: 100%;
+        }
+        
+        .virtual-scroll-viewport {
+            position: relative;
+            width: 100%;
+        }
+        
+        .virtual-scroll-item {
+            /* Each item in virtual scroll */
+            position: relative;
         }
 
         /* Expandable Insight Cards */
@@ -2274,12 +2309,21 @@
                 tabsHtml += '</div>';
                 
                 let contentHtml = '<div class="tab-content active" id="tab-news">';
-                // Render immediately without waiting for liked status if skipLikedStatus is true
-                contentHtml += await renderItemsList(newsItems, 'news', false, skipLikedStatus);
+                // Use virtual scrolling for large lists (threshold: 20 items)
+                if (newsItems.length > 20) {
+                    contentHtml += await renderItemsListVirtual(newsItems, 'news', skipLikedStatus);
+                } else {
+                    contentHtml += await renderItemsList(newsItems, 'news', false, skipLikedStatus);
+                }
                 contentHtml += '</div>';
                 
                 contentHtml += '<div class="tab-content" id="tab-trades">';
-                contentHtml += await renderItemsList(tradesItems, 'trades', false, skipLikedStatus);
+                // Use virtual scrolling for large lists (threshold: 20 items)
+                if (tradesItems.length > 20) {
+                    contentHtml += await renderItemsListVirtual(tradesItems, 'trades', skipLikedStatus);
+                } else {
+                    contentHtml += await renderItemsList(tradesItems, 'trades', false, skipLikedStatus);
+                }
                 contentHtml += '</div>';
                 
                 contentHtml += '<div class="tab-content" id="tab-liked">';
@@ -2294,6 +2338,22 @@
                 const perfBeforeRender = performance.now();
                 display.innerHTML = fullHtml;
                 const perfAfterRender = performance.now();
+                
+                // Initialize virtual scrolling for large lists (after DOM is ready)
+                setTimeout(() => {
+                    if (newsItems.length > 20) {
+                        const newsContainer = document.getElementById('virtual-scroll-news');
+                        if (newsContainer) {
+                            initVirtualScroll('virtual-scroll-news', 'news');
+                        }
+                    }
+                    if (tradesItems.length > 20) {
+                        const tradesContainer = document.getElementById('virtual-scroll-trades');
+                        if (tradesContainer) {
+                            initVirtualScroll('virtual-scroll-trades', 'trades');
+                        }
+                    }
+                }, 100);
                 
                 // Performance logging
                 const perfRenderEnd = performance.now();
@@ -2777,6 +2837,148 @@
             
             html += htmlOnly ? '' : '</div>';
             return html;
+        }
+        
+        // Virtual scrolling renderer - only renders visible items
+        async function renderItemsListVirtual(items, type, skipLikedStatus = false) {
+            if (items.length === 0) {
+                return '<div class="summary-content"><p style="color: #999; font-style: italic;">No items available.</p></div>';
+            }
+            
+            // Estimate item height (average height of an insight card)
+            const ESTIMATED_ITEM_HEIGHT = 120; // pixels
+            const VIEWPORT_HEIGHT = window.innerHeight * 0.7; // Use 70% of viewport
+            const BUFFER_ITEMS = 5; // Render extra items above/below viewport
+            
+            // Calculate visible range
+            const itemsPerViewport = Math.ceil(VIEWPORT_HEIGHT / ESTIMATED_ITEM_HEIGHT);
+            const startIndex = Math.max(0, 0 - BUFFER_ITEMS);
+            const endIndex = Math.min(items.length, itemsPerViewport + BUFFER_ITEMS);
+            
+            // Store all items data for virtual scrolling
+            if (!window.virtualScrollData) {
+                window.virtualScrollData = {};
+            }
+            window.virtualScrollData[type] = {
+                items: items,
+                skipLikedStatus: skipLikedStatus,
+                type: type,
+                totalItems: items.length,
+                itemHeight: ESTIMATED_ITEM_HEIGHT
+            };
+            
+            // Render visible items only
+            const visibleItems = items.slice(startIndex, endIndex);
+            const visibleHtml = await renderItemsList(visibleItems, type, false, skipLikedStatus);
+            
+            // Create virtual scroll container
+            const totalHeight = items.length * ESTIMATED_ITEM_HEIGHT;
+            const topSpacerHeight = startIndex * ESTIMATED_ITEM_HEIGHT;
+            const bottomSpacerHeight = (items.length - endIndex) * ESTIMATED_ITEM_HEIGHT;
+            
+            return `
+                <div class="virtual-scroll-container" id="virtual-scroll-${type}" data-total-items="${items.length}" data-item-height="${ESTIMATED_ITEM_HEIGHT}">
+                    <div class="virtual-scroll-spacer" style="height: ${topSpacerHeight}px;" id="virtual-spacer-top-${type}"></div>
+                    <div class="virtual-scroll-viewport" id="virtual-viewport-${type}">
+                        ${visibleHtml.replace('<div class="summary-content">', '<div class="summary-content" style="padding: 0;">')}
+                    </div>
+                    <div class="virtual-scroll-spacer" style="height: ${bottomSpacerHeight}px;" id="virtual-spacer-bottom-${type}"></div>
+                </div>
+            `;
+        }
+        
+        // Initialize virtual scroll for a container
+        function initVirtualScroll(containerId, type) {
+            const container = document.getElementById(containerId);
+            if (!container) {
+                console.warn(`[VIRTUAL SCROLL] Container ${containerId} not found`);
+                return;
+            }
+            
+            const data = window.virtualScrollData?.[type];
+            if (!data) {
+                console.warn(`[VIRTUAL SCROLL] Data for ${type} not found`);
+                return;
+            }
+            
+            // Find the scrollable parent (tab-content)
+            const tabContent = container.closest('.tab-content');
+            if (!tabContent) {
+                console.warn(`[VIRTUAL SCROLL] Tab content not found for ${type}`);
+                return;
+            }
+            
+            let scrollTimeout;
+            const handleScroll = () => {
+                clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {
+                    updateVirtualScroll(tabContent, containerId, type);
+                }, 50); // Debounce scroll events
+            };
+            
+            tabContent.addEventListener('scroll', handleScroll);
+            
+            // Initial setup
+            updateVirtualScroll(tabContent, containerId, type);
+            
+            console.log(`[VIRTUAL SCROLL] Initialized for ${type} with ${data.totalItems} items`);
+        }
+        
+        // Update visible items based on scroll position
+        async function updateVirtualScroll(scrollContainer, containerId, type) {
+            if (!scrollContainer) return;
+            
+            const data = window.virtualScrollData?.[type];
+            if (!data) return;
+            
+            const scrollTop = scrollContainer.scrollTop;
+            const containerHeight = scrollContainer.clientHeight;
+            const itemHeight = data.itemHeight;
+            const BUFFER_ITEMS = 5;
+            
+            // Calculate visible range
+            const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - BUFFER_ITEMS);
+            const endIndex = Math.min(data.totalItems, Math.ceil((scrollTop + containerHeight) / itemHeight) + BUFFER_ITEMS);
+            
+            // Check if we need to update
+            const viewport = document.getElementById(`virtual-viewport-${type}`);
+            const currentStart = parseInt(viewport?.dataset.startIndex || '-1');
+            const currentEnd = parseInt(viewport?.dataset.endIndex || '-1');
+            
+            if (currentStart === startIndex && currentEnd === endIndex) {
+                return; // No update needed
+            }
+            
+            // Update spacers
+            const topSpacer = document.getElementById(`virtual-spacer-top-${type}`);
+            const bottomSpacer = document.getElementById(`virtual-spacer-bottom-${type}`);
+            if (topSpacer) topSpacer.style.height = `${startIndex * itemHeight}px`;
+            if (bottomSpacer) bottomSpacer.style.height = `${(data.totalItems - endIndex) * itemHeight}px`;
+            
+            // Render visible items
+            const visibleItems = data.items.slice(startIndex, endIndex);
+            const visibleHtml = await renderItemsList(visibleItems, type, false, data.skipLikedStatus);
+            
+            if (viewport) {
+                viewport.innerHTML = visibleHtml.replace('<div class="summary-content">', '<div class="summary-content" style="padding: 0;">');
+                viewport.dataset.startIndex = startIndex;
+                viewport.dataset.endIndex = endIndex;
+            }
+            
+            // Log performance metrics
+            const renderedCount = endIndex - startIndex;
+            console.log(`[VIRTUAL SCROLL] ${type}: Rendering items ${startIndex}-${endIndex} (${renderedCount} of ${data.totalItems} total, efficiency: ${((data.totalItems - renderedCount) / data.totalItems * 100).toFixed(1)}%)`);
+            
+            if (window.performanceMetrics) {
+                window.performanceMetrics.push({
+                    timestamp: Date.now(),
+                    operation: 'virtualScrollUpdate',
+                    type: type,
+                    renderedItems: renderedCount,
+                    totalItems: data.totalItems,
+                    efficiency: ((data.totalItems - renderedCount) / data.totalItems * 100).toFixed(1) + '%'
+                });
+            }
         }
         
         // Process markdown helper for items (reuse existing logic)
