@@ -2438,7 +2438,27 @@
                     if (shouldDisable) {
                         btn.disabled = true;
                         btn.textContent = 'No More Items';
+                        btn.setAttribute('data-no-more', 'true');
+                        // Stop observing when no more items
+                        stopInfiniteScroll(btn);
+                    } else {
+                        // Re-enable button and restore text if more items available
+                        btn.disabled = false;
+                        btn.textContent = 'Load More';
+                        btn.removeAttribute('data-no-more');
+                        // Ensure observer is setup (in case button was recreated)
+                        if (!infiniteScrollObservers.has(btn.id)) {
+                            setupInfiniteScroll(btn);
+                        }
                     }
+                });
+            } else {
+                // No more items - stop observing
+                document.querySelectorAll('.load-more-button').forEach(btn => {
+                    btn.disabled = true;
+                    btn.textContent = 'No More Items';
+                    btn.setAttribute('data-no-more', 'true');
+                    stopInfiniteScroll(btn);
                 });
             }
             
@@ -2578,23 +2598,31 @@
                         if (newsTab && hasMoreNews && itemType !== 'trades') {
                             const loadMoreBtn = document.createElement('button');
                             loadMoreBtn.className = 'load-more-button';
+                            loadMoreBtn.id = 'load-more-news';
                             loadMoreBtn.textContent = 'Load More';
                             loadMoreBtn.onclick = () => loadMoreItems();
                             newsTab.appendChild(loadMoreBtn);
+                            // Setup infinite scroll observer
+                            setupInfiniteScroll(loadMoreBtn);
                         }
                         
                         if (tradesTab && hasMoreTrades && itemType !== 'news') {
                             const loadMoreBtn = document.createElement('button');
                             loadMoreBtn.className = 'load-more-button';
+                            loadMoreBtn.id = 'load-more-trades';
                             loadMoreBtn.textContent = 'Load More';
                             loadMoreBtn.onclick = () => loadMoreItems();
                             tradesTab.appendChild(loadMoreBtn);
+                            // Setup infinite scroll observer
+                            setupInfiniteScroll(loadMoreBtn);
                         }
                     } else {
                         // Remove buttons if no more items
                         document.querySelectorAll('.load-more-button').forEach(btn => {
                             btn.disabled = true;
                             btn.textContent = 'No More Items';
+                            btn.setAttribute('data-no-more', 'true');
+                            stopInfiniteScroll(btn);
                         });
                     }
                 }
@@ -2993,6 +3021,51 @@
             }
             
             return html;
+        }
+        
+        // Infinite scroll state
+        let infiniteScrollObservers = new Map();
+        let isLoadingMore = false;
+        
+        // Setup infinite scroll observer for Load More button
+        function setupInfiniteScroll(button) {
+            // Don't setup if already observing
+            if (infiniteScrollObservers.has(button.id)) {
+                return;
+            }
+            
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    // When button enters viewport and is not disabled
+                    if (entry.isIntersecting && !button.disabled && !isLoadingMore) {
+                        console.log('[INFINITE SCROLL] Load More button visible, auto-loading...');
+                        isLoadingMore = true;
+                        button.textContent = 'Loading...';
+                        button.disabled = true;
+                        
+                        loadMoreItems().finally(() => {
+                            isLoadingMore = false;
+                            // Button state will be updated by renderMergedItems
+                        });
+                    }
+                });
+            }, {
+                rootMargin: '100px' // Trigger 100px before button enters viewport
+            });
+            
+            observer.observe(button);
+            infiniteScrollObservers.set(button.id, observer);
+            console.log(`[INFINITE SCROLL] Observer setup for ${button.id}`);
+        }
+        
+        // Stop infinite scroll observer
+        function stopInfiniteScroll(button) {
+            const observer = infiniteScrollObservers.get(button.id);
+            if (observer) {
+                observer.disconnect();
+                infiniteScrollObservers.delete(button.id);
+                console.log(`[INFINITE SCROLL] Observer stopped for ${button.id}`);
+            }
         }
         
         // Load more items
