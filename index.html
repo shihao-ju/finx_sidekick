@@ -2309,21 +2309,13 @@
                 tabsHtml += '</div>';
                 
                 let contentHtml = '<div class="tab-content active" id="tab-news">';
-                // Use virtual scrolling for large lists (threshold: 20 items)
-                if (newsItems.length > 20) {
-                    contentHtml += await renderItemsListVirtual(newsItems, 'news', skipLikedStatus);
-                } else {
-                    contentHtml += await renderItemsList(newsItems, 'news', false, skipLikedStatus);
-                }
+                // Note: Virtual scrolling disabled - using pagination instead (limit=10 per request)
+                // Virtual scrolling requires all data upfront, but we use pagination (load more button)
+                contentHtml += await renderItemsList(newsItems, 'news', false, skipLikedStatus);
                 contentHtml += '</div>';
                 
                 contentHtml += '<div class="tab-content" id="tab-trades">';
-                // Use virtual scrolling for large lists (threshold: 20 items)
-                if (tradesItems.length > 20) {
-                    contentHtml += await renderItemsListVirtual(tradesItems, 'trades', skipLikedStatus);
-                } else {
-                    contentHtml += await renderItemsList(tradesItems, 'trades', false, skipLikedStatus);
-                }
+                contentHtml += await renderItemsList(tradesItems, 'trades', false, skipLikedStatus);
                 contentHtml += '</div>';
                 
                 contentHtml += '<div class="tab-content" id="tab-liked">';
@@ -2339,21 +2331,8 @@
                 display.innerHTML = fullHtml;
                 const perfAfterRender = performance.now();
                 
-                // Initialize virtual scrolling for large lists (after DOM is ready)
-                setTimeout(() => {
-                    if (newsItems.length > 20) {
-                        const newsContainer = document.getElementById('virtual-scroll-news');
-                        if (newsContainer) {
-                            initVirtualScroll('virtual-scroll-news', 'news');
-                        }
-                    }
-                    if (tradesItems.length > 20) {
-                        const tradesContainer = document.getElementById('virtual-scroll-trades');
-                        if (tradesContainer) {
-                            initVirtualScroll('virtual-scroll-trades', 'trades');
-                        }
-                    }
-                }, 100);
+                // Note: Virtual scrolling initialization removed
+                // Current implementation uses pagination (load more button) instead
                 
                 // Performance logging
                 const perfRenderEnd = performance.now();
