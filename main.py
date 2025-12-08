@@ -2343,11 +2343,15 @@ async def update_scheduler_config(config_update: Dict, token: str = Query(...)):
 
 
 @app.get("/admin")
-async def admin_page():
+async def admin_page(response: Response):
     """Serve the admin page. Authentication is handled client-side."""
+    # Prevent caching to avoid browser cache issues
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     try:
         with open("admin.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Admin page not found</h1>", status_code=404)
 
