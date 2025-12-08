@@ -665,6 +665,31 @@
             box-shadow: none;
             opacity: 0.6;
         }
+        
+        /* Loading indicator for infinite scroll */
+        .load-more-button:disabled:not([data-no-more]) {
+            position: relative;
+        }
+        
+        .load-more-button:disabled:not([data-no-more])::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            margin: auto;
+            border: 2px solid transparent;
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
 
         .summary-display.empty {
             display: flex;
