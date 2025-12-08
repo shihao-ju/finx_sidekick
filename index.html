@@ -1181,6 +1181,58 @@
                     <button class="btn btn-primary btn-icon" onclick="addAccount()" title="Add account">+</button>
                 </div>
                 <ul class="accounts-list" id="accountsList"></ul>
+                
+                <!-- Filter Section -->
+                <div class="filter-section" style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #e0e0e0;">
+                    <h2 style="font-size: 1.3em; margin-bottom: 20px; color: #333;">🔍 Filters</h2>
+                    
+                    <!-- Search -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: 600;">Search</label>
+                        <input type="text" id="filterSearch" placeholder="Search title/content..." 
+                               style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
+                               onkeyup="handleFilterChange()" />
+                    </div>
+                    
+                    <!-- Ticker Filter -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: 600;">Ticker</label>
+                        <input type="text" id="filterTicker" placeholder="e.g., TSLA, AAPL" 
+                               style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box; text-transform: uppercase;"
+                               onkeyup="handleFilterChange()" />
+                    </div>
+                    
+                    <!-- Account Filter -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: 600;">Account</label>
+                        <select id="filterAccount" 
+                                style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box; background: white;"
+                                onchange="handleFilterChange()">
+                            <option value="">All Accounts</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Date Range -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: 600;">Start Date</label>
+                        <input type="date" id="filterStartDate" 
+                               style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
+                               onchange="handleFilterChange()" />
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: 600;">End Date</label>
+                        <input type="date" id="filterEndDate" 
+                               style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
+                               onchange="handleFilterChange()" />
+                    </div>
+                    
+                    <!-- Clear Filters Button -->
+                    <button class="btn btn-primary" onclick="clearFilters()" 
+                            style="width: 100%; padding: 10px; font-size: 14px; text-transform: none;">
+                        Clear Filters
+                    </button>
+                </div>
             </div>
 
             <div class="main-content">
@@ -1439,6 +1491,25 @@
             const list = document.getElementById('accountsList');
             list.innerHTML = '';
             
+            // Update account filter dropdown
+            const accountFilter = document.getElementById('filterAccount');
+            if (accountFilter) {
+                // Keep "All Accounts" option
+                accountFilter.innerHTML = '<option value="">All Accounts</option>';
+                
+                if (accounts.length > 0) {
+                    accounts.forEach(account => {
+                        const handle = account.handle || account;
+                        const username = account.username || account.name || null;
+                        const displayName = username ? `${username} (@${handle})` : `@${handle}`;
+                        const option = document.createElement('option');
+                        option.value = handle;
+                        option.textContent = displayName;
+                        accountFilter.appendChild(option);
+                    });
+                }
+            }
+            
             if (accounts.length === 0) {
                 list.innerHTML = '<li style="color: #999; font-style: italic;">No accounts added yet</li>';
                 updateAuthUI(); // Update UI after rendering
@@ -1460,6 +1531,67 @@
                 list.appendChild(li);
             });
             updateAuthUI(); // Update UI after rendering accounts
+        }
+        
+        // Filter functions
+        function buildFilterParams() {
+            const params = {};
+            
+            const search = document.getElementById('filterSearch')?.value.trim();
+            if (search) {
+                params.search = search;
+            }
+            
+            const ticker = document.getElementById('filterTicker')?.value.trim();
+            if (ticker) {
+                params.ticker = ticker.toUpperCase().replace('$', '');
+            }
+            
+            const account = document.getElementById('filterAccount')?.value;
+            if (account) {
+                params.account = account;
+            }
+            
+            const startDate = document.getElementById('filterStartDate')?.value;
+            if (startDate) {
+                // Convert YYYY-MM-DD to ISO format
+                params.start_date = `${startDate}T00:00:00`;
+            }
+            
+            const endDate = document.getElementById('filterEndDate')?.value;
+            if (endDate) {
+                // Convert YYYY-MM-DD to ISO format
+                params.end_date = `${endDate}T23:59:59`;
+            }
+            
+            return params;
+        }
+        
+        function handleFilterChange() {
+            // Debounce: wait 500ms after user stops typing before applying filter
+            clearTimeout(window.filterTimeout);
+            window.filterTimeout = setTimeout(() => {
+                // Clear cache when filters change
+                clearMergedItemsCache();
+                // Reload items with new filters
+                renderMergedItems(currentItemType || 'all', 0, false).catch(err => {
+                    console.error('Error reloading with filters:', err);
+                });
+            }, 500);
+        }
+        
+        function clearFilters() {
+            document.getElementById('filterSearch').value = '';
+            document.getElementById('filterTicker').value = '';
+            document.getElementById('filterAccount').value = '';
+            document.getElementById('filterStartDate').value = '';
+            document.getElementById('filterEndDate').value = '';
+            
+            // Clear cache and reload
+            clearMergedItemsCache();
+            renderMergedItems(currentItemType || 'all', 0, false).catch(err => {
+                console.error('Error reloading after clearing filters:', err);
+            });
         }
 
         async function addAccount() {
@@ -2273,10 +2405,11 @@
         async function renderMergedItems(itemType = 'all', offset = 0, append = false) {
             const display = document.getElementById('summaryDisplay');
             
-            // Check cache first (only for main view: itemType='all', offset=0, not appending)
+            // Check cache first (only for main view: itemType='all', offset=0, not appending, and no filters)
             let cachedData = null;
             let cachedHtml = null;
-            if (!append && itemType === 'all' && offset === 0) {
+            const hasFilters = Object.keys(buildFilterParams()).length > 0;
+            if (!append && itemType === 'all' && offset === 0 && !hasFilters) {
                 cachedData = getMergedItemsCache();
                 cachedHtml = getMergedItemsHtmlCache();
                 if (cachedHtml && cachedData) {
@@ -2318,7 +2451,12 @@
             // Always fetch fresh data in background with batch liked status and thoughts
             try {
                 const perfStart = performance.now();
-                const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}&include_liked_status=true&include_thoughts=true`);
+                
+                // Build filter parameters
+                const filterParams = buildFilterParams();
+                const filterQuery = new URLSearchParams(filterParams).toString();
+                
+                const response = await fetch(`${API_BASE}/merged-items?limit=10&offset=${offset}&item_type=${itemType}&include_liked_status=true&include_thoughts=true${filterQuery ? '&' + filterQuery : ''}`);
                 const perfFetch = performance.now();
                 
                 if (!response.ok) {

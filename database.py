@@ -459,22 +459,65 @@ def save_parsed_trades_items(summary_id: int, trades_items: List[Dict]) -> None:
     conn.close()
 
 
-def get_all_parsed_news_items() -> List[Dict]:
+def get_all_parsed_news_items(
+    ticker: Optional[str] = None,
+    account: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    search: Optional[str] = None
+) -> List[Dict]:
     """
-    Get all parsed news items from database, ordered by timestamp (newest first).
+    Get parsed news items from database with optional filtering.
+    
+    Args:
+        ticker: Filter by ticker symbol (e.g., "TSLA", "AAPL"). Searches in title and content.
+        account: Filter by account handle (e.g., "hhuang"). Searches in source_tags.
+        start_date: Filter items after this date (ISO format: "2025-12-01T00:00:00")
+        end_date: Filter items before this date (ISO format: "2025-12-31T23:59:59")
+        search: Full-text search in title and content (case-insensitive)
     
     Returns:
-        List of news item dictionaries
+        List of news item dictionaries, ordered by timestamp (newest first)
     """
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    cursor.execute("""
+    query = """
         SELECT title, content, timestamp, tweet_ids, source_tags
         FROM parsed_news_items
-        ORDER BY timestamp DESC
-    """)
+        WHERE 1=1
+    """
+    params = []
     
+    # Ticker filter: search in title and content
+    if ticker:
+        ticker_upper = ticker.upper().lstrip('$')
+        query += " AND (UPPER(title) LIKE ? OR UPPER(content) LIKE ?)"
+        params.extend([f"%${ticker_upper}%", f"%${ticker_upper}%"])
+    
+    # Account filter: search in source_tags JSON
+    if account:
+        account_lower = account.lower().lstrip('@')
+        query += " AND (LOWER(source_tags) LIKE ?)"
+        params.append(f"%{account_lower}%")
+    
+    # Date range filter
+    if start_date:
+        query += " AND timestamp >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND timestamp <= ?"
+        params.append(end_date)
+    
+    # Full-text search
+    if search:
+        search_term = f"%{search}%"
+        query += " AND (LOWER(title) LIKE ? OR LOWER(content) LIKE ?)"
+        params.extend([search_term.lower(), search_term.lower()])
+    
+    query += " ORDER BY timestamp DESC"
+    
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
     
@@ -490,22 +533,65 @@ def get_all_parsed_news_items() -> List[Dict]:
     ]
 
 
-def get_all_parsed_trades_items() -> List[Dict]:
+def get_all_parsed_trades_items(
+    ticker: Optional[str] = None,
+    account: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    search: Optional[str] = None
+) -> List[Dict]:
     """
-    Get all parsed trades items from database, ordered by timestamp (newest first).
+    Get parsed trades items from database with optional filtering.
+    
+    Args:
+        ticker: Filter by ticker symbol (e.g., "TSLA", "AAPL"). Searches in title and content.
+        account: Filter by account handle (e.g., "hhuang"). Searches in source_tags.
+        start_date: Filter items after this date (ISO format: "2025-12-01T00:00:00")
+        end_date: Filter items before this date (ISO format: "2025-12-31T23:59:59")
+        search: Full-text search in title and content (case-insensitive)
     
     Returns:
-        List of trades item dictionaries
+        List of trades item dictionaries, ordered by timestamp (newest first)
     """
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    cursor.execute("""
+    query = """
         SELECT title, content, timestamp, tweet_ids, source_tags
         FROM parsed_trades_items
-        ORDER BY timestamp DESC
-    """)
+        WHERE 1=1
+    """
+    params = []
     
+    # Ticker filter: search in title and content
+    if ticker:
+        ticker_upper = ticker.upper().lstrip('$')
+        query += " AND (UPPER(title) LIKE ? OR UPPER(content) LIKE ?)"
+        params.extend([f"%${ticker_upper}%", f"%${ticker_upper}%"])
+    
+    # Account filter: search in source_tags JSON
+    if account:
+        account_lower = account.lower().lstrip('@')
+        query += " AND (LOWER(source_tags) LIKE ?)"
+        params.append(f"%{account_lower}%")
+    
+    # Date range filter
+    if start_date:
+        query += " AND timestamp >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND timestamp <= ?"
+        params.append(end_date)
+    
+    # Full-text search
+    if search:
+        search_term = f"%{search}%"
+        query += " AND (LOWER(title) LIKE ? OR LOWER(content) LIKE ?)"
+        params.extend([search_term.lower(), search_term.lower()])
+    
+    query += " ORDER BY timestamp DESC"
+    
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
     

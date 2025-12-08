@@ -1866,7 +1866,12 @@ async def get_merged_items(
     offset: int = 0, 
     item_type: str = "all",
     include_liked_status: bool = Query(False, description="Include liked status for items"),
-    include_thoughts: bool = Query(False, description="Include thoughts for items")
+    include_thoughts: bool = Query(False, description="Include thoughts for items"),
+    ticker: Optional[str] = Query(None, description="Filter by ticker symbol (e.g., TSLA, AAPL)"),
+    account: Optional[str] = Query(None, description="Filter by account handle (e.g., hhuang)"),
+    start_date: Optional[str] = Query(None, description="Filter items after this date (ISO format)"),
+    end_date: Optional[str] = Query(None, description="Filter items before this date (ISO format)"),
+    search: Optional[str] = Query(None, description="Full-text search in title and content")
 ):
     """
     Get merged news and trades items from pre-computed parsed items, sorted chronologically.
@@ -1880,6 +1885,11 @@ async def get_merged_items(
         item_type: "all", "news", or "trades" (default: "all")
         include_liked_status: If True, include liked status for each item (default: False)
         include_thoughts: If True, include thoughts for each item (default: False)
+        ticker: Filter by ticker symbol (e.g., "TSLA", "AAPL"). Searches in title and content.
+        account: Filter by account handle (e.g., "hhuang"). Searches in source_tags.
+        start_date: Filter items after this date (ISO format: "2025-12-01T00:00:00")
+        end_date: Filter items before this date (ISO format: "2025-12-31T23:59:59")
+        search: Full-text search in title and content (case-insensitive)
     
     Returns:
         MergedItemsResponse with chronologically sorted news and trades
@@ -1887,10 +1897,22 @@ async def get_merged_items(
     import time
     start_time = time.time()
     
-    # Get pre-computed parsed items directly from database (fast!)
+    # Get pre-computed parsed items directly from database with filtering (fast!)
     # Duplicates are prevented at the database level via unique index on content_hash
-    all_news = get_all_parsed_news_items()
-    all_trades = get_all_parsed_trades_items()
+    all_news = get_all_parsed_news_items(
+        ticker=ticker,
+        account=account,
+        start_date=start_date,
+        end_date=end_date,
+        search=search
+    )
+    all_trades = get_all_parsed_trades_items(
+        ticker=ticker,
+        account=account,
+        start_date=start_date,
+        end_date=end_date,
+        search=search
+    )
     
     # Sort by timestamp (newest first)
     all_news.sort(key=lambda x: x["timestamp"], reverse=True)
